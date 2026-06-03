@@ -51,7 +51,8 @@ export function shouldUseMinimalLayout(columns: number, rows: number): boolean {
 }
 
 export function shouldStackPanes(columns: number, rows: number, worktreeCount = 0): boolean {
-	const minimumRows = Math.max(26, worktreeCount + 18);
+	// Stacked panes are taller than split panes. Only use them when the full frame can fit the viewport.
+	const minimumRows = Math.max(36, worktreeCount + 34);
 	return columns < 96 && rows >= minimumRows;
 }
 
@@ -201,7 +202,7 @@ export function App({
 
 	if (minimalLayout) {
 		return (
-			<Box width={rootWidth} flexDirection="column">
+			<Box width={rootWidth} height={rootHeight} flexDirection="column">
 				<Text bold color="green" wrap="truncate-end">
 					A:{model.activeBranch ?? '-'}
 				</Text>
@@ -214,7 +215,7 @@ export function App({
 
 	if (compactLayout) {
 		return (
-			<Box width={rootWidth} borderStyle="round" borderColor="yellow" flexDirection="column" paddingX={1}>
+			<Box width={rootWidth} height={rootHeight} borderStyle="round" borderColor="yellow" flexDirection="column" paddingX={1}>
 				<Text bold color="green" wrap="truncate-end">
 					Active: {model.activeBranch ?? '-'}
 				</Text>
@@ -234,7 +235,7 @@ export function App({
 	}
 
 	return (
-		<Box width={rootWidth} height={stackedLayout ? undefined : rootHeight} borderStyle="round" borderColor="gray" flexDirection="column" paddingX={1}>
+		<Box width={rootWidth} height={rootHeight} borderStyle="round" borderColor="gray" flexDirection="column" paddingX={1}>
 			<Header repoName={model.repoName} namespace={model.namespace} activeBranch={model.activeBranch} />
 			<Box flexDirection={stackedLayout ? 'column' : 'row'} flexGrow={stackedLayout ? 0 : 1} flexShrink={1}>
 				<WorktreeList rows={model.rows} selectedIndex={selectedIndex} width={stackedLayout ? bodyWidth : listWidth} stacked={stackedLayout} />

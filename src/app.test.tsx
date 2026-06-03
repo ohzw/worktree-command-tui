@@ -35,14 +35,28 @@ async function waitForInput(): Promise<void> {
 	await promise;
 }
 
-it('uses alternate screen render options', () => {
-	expect(APP_RENDER_OPTIONS).toEqual({alternateScreen: true, exitOnCtrlC: true});
+it('uses alternate screen and incremental rendering options', () => {
+	expect(APP_RENDER_OPTIONS).toEqual({alternateScreen: true, exitOnCtrlC: true, incrementalRendering: true});
 });
 
 it('never grows the shell beyond the available terminal viewport', () => {
 	expect(getShellDimensions(8, 8)).toEqual({rootWidth: 8, rootHeight: 8, bodyWidth: 4, listWidth: 1, actionWidth: 2});
 	expect(getShellDimensions(45, 12)).toEqual({rootWidth: 45, rootHeight: 12, bodyWidth: 41, listWidth: 13, actionWidth: 27});
 	expect(getShellDimensions(100, 30)).toEqual({rootWidth: 100, rootHeight: 30, bodyWidth: 96, listWidth: 32, actionWidth: 63});
+});
+
+it('renders one fullscreen frame for each responsive layout', () => {
+	const model = createModel();
+	for (const windowSizeOverride of [
+		{columns: 8, rows: 4},
+		{columns: 30, rows: 8},
+		{columns: 90, rows: 30},
+		{columns: 90, rows: 40},
+		{columns: 120, rows: 30},
+	]) {
+		const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={windowSizeOverride} />);
+		expect((lastFrame() ?? '').split('\n')).toHaveLength(windowSizeOverride.rows);
+	}
 });
 
 it('switches to compact, stacked, and minimal layouts at the expected breakpoints', () => {
@@ -53,9 +67,9 @@ it('switches to compact, stacked, and minimal layouts at the expected breakpoint
 	expect(shouldUseCompactLayout(72, 20, 10)).toBe(true);
 	expect(shouldUseCompactLayout(90, 22, 3)).toBe(true);
 	expect(shouldUseCompactLayout(120, 30, 3)).toBe(false);
-	expect(shouldStackPanes(90, 24, 3)).toBe(false);
-	expect(shouldStackPanes(90, 30, 3)).toBe(true);
-	expect(shouldStackPanes(120, 30, 3)).toBe(false);
+	expect(shouldStackPanes(90, 30, 3)).toBe(false);
+	expect(shouldStackPanes(90, 40, 3)).toBe(true);
+	expect(shouldStackPanes(120, 40, 3)).toBe(false);
 });
 
 it('renders colored pane labels and active marker in the main layout', () => {
@@ -102,10 +116,10 @@ it('keeps the selection pane width stable across selected worktrees', () => {
 	expect(shortTitleLine.indexOf('Selection / Action')).toBe(longTitleLine.indexOf('Selection / Action'));
 });
 
-it('stacks panes responsively on medium-width terminals', () => {
+it('stacks panes responsively on medium-width terminals when there is enough vertical space', () => {
 	const model = createModel();
 	const {lastFrame} = render(
-		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 90, rows: 30}} />,
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 90, rows: 40}} />,
 	);
 	expect(lastFrame()).toContain('Worktrees');
 	expect(lastFrame()).toContain('Selection / Action');

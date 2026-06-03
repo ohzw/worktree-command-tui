@@ -76,12 +76,32 @@ if (subcommand !== undefined) {
 
 try {
 	const [initialModel, actions] = await Promise.all([buildInitialModel(cwd), buildActions(cwd)]);
-	render(
+	const createApp = () => (
 		<ThemeProvider theme={appTheme}>
 			<App initialModel={initialModel} actions={actions} />
-		</ThemeProvider>,
-		APP_RENDER_OPTIONS,
+		</ThemeProvider>
 	);
+	const instance = render(createApp(), APP_RENDER_OPTIONS);
+	let repaintTimer: ReturnType<typeof setTimeout> | undefined;
+	const repaintAfterResize = () => {
+		// Give Ink/useWindowSize one tick to observe the new size, then force a fresh root render.
+		if (repaintTimer) {
+			clearTimeout(repaintTimer);
+		}
+		repaintTimer = setTimeout(() => {
+			instance.rerender(createApp());
+		}, 25);
+	};
+
+	if (process.stdout.isTTY) {
+		process.stdout.on('resize', repaintAfterResize);
+		void instance.waitUntilExit().finally(() => {
+			if (repaintTimer) {
+				clearTimeout(repaintTimer);
+			}
+			process.stdout.off('resize', repaintAfterResize);
+		});
+	}
 } catch (error) {
 	console.error(describeError(error));
 	process.exit(1);

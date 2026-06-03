@@ -117,12 +117,40 @@ it('uses split layout when the stacked breakpoint no longer applies', () => {
 		shortPath: `.worktree/feat-${index}`,
 		branch: `feat/${index}`,
 		tags: (index === 0 ? ['active'] : []) as RowTag[],
+		pullRequest: index === 0 ? {kind: 'found', number: 2125, title: 'Selection pane metadata', url: 'https://github.com/finn-inc/reclaim-the-forest/pull/2125', state: 'OPEN', isDraft: true, baseBranch: 'develop'} : undefined,
 	}));
 	const model = createModel({rows: manyRows, activePath: '/repo/.worktree/feat-0', activeBranch: 'feat/0'});
 	const {lastFrame} = render(
 		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 90, rows: 26}} />,
 	);
-	expect(lastFrame()).toContain('Selection / Action');
+	expect(lastFrame()).toContain('[Action]');
+	expect(lastFrame()).toContain('[Notes]');
+	expect(lastFrame()).toContain('Status: idle — ready');
+	expect(lastFrame()).not.toContain('Full Path:');
+	expect(lastFrame()).not.toContain('Tags:');
+	expect(lastFrame()).not.toContain('PR Title:');
+});
+it('keeps rich detail rows on medium split terminals', () => {
+	const model = createModel({
+		rows: [{
+			path: '/repo/.worktree/feat-a',
+			shortPath: '.worktree/feat-a',
+			branch: 'feat/a',
+			tags: ['active'],
+			headSha: '46af3f1c',
+			upstream: {branch: 'origin/develop', ahead: 4, behind: 24},
+			workingTree: {staged: 1, unstaged: 0, untracked: 0, conflicts: 0},
+			pullRequest: {kind: 'found', number: 2125, title: 'Selection pane metadata', url: 'https://github.com/finn-inc/reclaim-the-forest/pull/2125', state: 'OPEN', isDraft: true, baseBranch: 'develop'},
+		}] as AppModel['rows'],
+		activePath: '/repo/.worktree/feat-a',
+		activeBranch: 'feat/a',
+	});
+	const {lastFrame} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 30}} />,
+	);
+	expect(lastFrame()).toContain('Full Path: /repo/.worktree/feat-a');
+	expect(lastFrame()).toContain('Tags: active');
+	expect(lastFrame()).toContain('PR Title: Selection pane metadata');
 	expect(lastFrame()).toContain('Status: idle — ready');
 });
 
@@ -198,12 +226,16 @@ it('shows git and PR metadata in the selection pane', () => {
 		activeBranch: 'feat/a',
 	});
 	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />);
+	expect(lastFrame()).toContain('[Identity]');
 	expect(lastFrame()).toContain('Path: .worktree/feat-a');
 	expect(lastFrame()).toContain('HEAD: 46af3f1c');
+	expect(lastFrame()).toContain('[Git / PR]');
 	expect(lastFrame()).toContain('Upstream: origin/develop (↑4 ↓24)');
 	expect(lastFrame()).toContain('Status: dirty (index 1 · worktree 2 · untracked 3)');
 	expect(lastFrame()).toContain('PR: #2125 draft/open → develop');
 	expect(lastFrame()).toContain('PR Title: Selection pane metadata');
+	expect(lastFrame()).toContain('[Action]');
+	expect(lastFrame()).toContain('Already active. Press s to stop the current session.');
 });
 it('shows unavailable metadata when git or gh inspection fails', () => {
 	const model = createModel({
@@ -289,8 +321,8 @@ it('shows invalid reason in the detail pane before start is attempted', () => {
 		activeBranch: null,
 	});
 	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />);
-	expect(lastFrame()).toContain('Cannot start this worktree.');
-	expect(lastFrame()).toContain('Notes: Missing required files: default.project.json');
+	expect(lastFrame()).toContain('[Notes]');
+	expect(lastFrame()).toContain('Missing required files: default.project.json');
 });
 
 it('supports vim-style movement keys', async () => {
@@ -359,7 +391,8 @@ it('keeps the same worktree selected when start reorders the list', async () => 
 	await waitForInput();
 	expect(lastFrame()).toContain('Active: feat/b');
 	expect(lastFrame()).toContain('Path: .worktree/feat-b');
-	expect(lastFrame()).toContain('Action: Already active. Press s to stop the current session.');
+	expect(lastFrame()).toContain('[Action]');
+	expect(lastFrame()).toContain('Already active. Press s to stop the current session.');
 });
 
 it('converts start failures into error status instead of crashing the app', async () => {

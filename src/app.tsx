@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useRef, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {Box, Text, useApp, useInput, useWindowSize} from 'ink';
 import {ActionPanel} from './components/ActionPanel.js';
 import {ContextBar} from './components/ContextBar.js';
@@ -86,6 +86,7 @@ export function App({
 	const minimalLayout = shouldUseMinimalLayout(rootWidth, rootHeight);
 	const compactLayout = !minimalLayout && shouldUseCompactLayout(rootWidth, rootHeight, model.rows.length);
 	const stackedLayout = !minimalLayout && !compactLayout && shouldStackPanes(rootWidth, rootHeight, model.rows.length);
+	const compactDetailPane = !stackedLayout && rootHeight <= 26;
 
 	function moveSelection(nextIndex: number): void {
 		if (model.rows.length === 0) {
@@ -192,7 +193,7 @@ export function App({
 			<Header repoName={model.repoName} namespace={model.namespace} activeBranch={model.activeBranch} />
 			<Box flexDirection={stackedLayout ? 'column' : 'row'} flexGrow={stackedLayout ? 0 : 1} flexShrink={1}>
 				<WorktreeList rows={model.rows} selectedIndex={selectedIndex} width={stackedLayout ? bodyWidth : listWidth} stacked={stackedLayout} />
-				<ActionPanel selectedRow={selected} activePath={model.activePath} stacked={stackedLayout} width={stackedLayout ? bodyWidth : actionWidth} />
+				<ActionPanel selectedRow={selected} activePath={model.activePath} stacked={stackedLayout} width={stackedLayout ? bodyWidth : actionWidth} compactDetails={compactDetailPane} />
 			</Box>
 			<ContextBar status={model.status} />
 		</Box>

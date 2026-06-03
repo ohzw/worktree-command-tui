@@ -73,6 +73,19 @@ function getPullRequestTitleLabel(selectedRow: AppRow): string {
 	return 'PR Title';
 }
 
+export function getPullRequestColor(selectedRow: AppRow): 'green' | 'yellow' | 'red' | undefined {
+	if (!selectedRow.pullRequest || selectedRow.pullRequest.kind === 'none') {
+		return undefined;
+	}
+	if (selectedRow.pullRequest.kind === 'unavailable') {
+		return 'red';
+	}
+	if (selectedRow.pullRequest.state !== 'OPEN') {
+		return undefined;
+	}
+	return selectedRow.pullRequest.isDraft ? 'yellow' : 'green';
+}
+
 function getActionMessage(selectedRow: AppRow, activePath: string | null): string {
 	if (selectedRow.invalidReason) {
 		return 'Cannot start this worktree.';
@@ -81,6 +94,23 @@ function getActionMessage(selectedRow: AppRow, activePath: string | null): strin
 		return 'Already active. Press s to stop the current session.';
 	}
 	return 'Press Enter to start here and switch the active session.';
+}
+
+export function getActionColor(selectedRow: AppRow): 'yellow' | 'red' | undefined {
+	if (selectedRow.invalidReason) {
+		return 'red';
+	}
+	if ((selectedRow.workingTree?.conflicts ?? 0) > 0) {
+		return 'red';
+	}
+	if (
+		(selectedRow.workingTree?.staged ?? 0) > 0
+		|| (selectedRow.workingTree?.unstaged ?? 0) > 0
+		|| (selectedRow.workingTree?.untracked ?? 0) > 0
+	) {
+		return 'yellow';
+	}
+	return undefined;
 }
 
 function getNotes(selectedRow: AppRow): string {
@@ -96,16 +126,26 @@ function getNotes(selectedRow: AppRow): string {
 	return 'Ready to launch with the configured command in this worktree.';
 }
 
+function SectionHeader({label}: {label: string}) {
+	return (
+		<Text bold color="cyan">
+			[{label}]
+		</Text>
+	);
+}
+
 export function ActionPanel({
 	selectedRow,
 	activePath,
 	stacked,
 	width,
+	compactDetails,
 }: {
 	selectedRow: AppRow | undefined;
 	activePath: string | null;
 	stacked: boolean;
 	width?: number;
+	compactDetails?: boolean;
 }) {
 	if (!selectedRow) {
 		return (
@@ -118,24 +158,41 @@ export function ActionPanel({
 		);
 	}
 
+	const actionMessage = getActionMessage(selectedRow, activePath);
+	const showFullPath = !compactDetails && selectedRow.shortPath !== selectedRow.path;
+	const showTags = !compactDetails;
+	const pullRequestTitle = selectedRow.pullRequest?.kind === 'found' && !compactDetails
+		? sanitizeInlineText(selectedRow.pullRequest.title)
+		: null;
+
 	return (
 		<Box width={width} flexGrow={stacked ? 0 : 1} flexShrink={1} borderStyle="round" borderColor="magenta" flexDirection="column" paddingX={1}>
 			<Text bold color="magenta">
 				Selection / Action
 			</Text>
+			<SectionHeader label="Identity" />
 			<Text bold color={selectedRow.tags.includes('active') ? 'green' : undefined} wrap="truncate-end">
 				Branch: {sanitizeInlineText(selectedRow.branch)}
 			</Text>
 			<Text wrap="truncate-end">Path: {sanitizeInlineText(selectedRow.shortPath)}</Text>
-			{selectedRow.shortPath !== selectedRow.path ? <Text wrap="truncate-end">Full Path: {sanitizeInlineText(selectedRow.path)}</Text> : undefined}
+			{showFullPath ? <Text wrap="truncate-end">Full Path: {sanitizeInlineText(selectedRow.path)}</Text> : undefined}
 			<Text wrap="truncate-end">HEAD: {selectedRow.headSha || '-'}</Text>
+			{showTags ? <Text wrap="truncate-end">Tags: {formatTags(selectedRow.tags)}</Text> : undefined}
+			<SectionHeader label="Git / PR" />
 			<Text wrap="truncate-end">Upstream: {formatUpstream(selectedRow)}</Text>
 			<Text wrap="truncate-end">Status: {formatWorkingTree(selectedRow)}</Text>
-			<Text wrap="truncate-end">{getPullRequestLabel(selectedRow)}: {formatPullRequest(selectedRow)}</Text>
-			{selectedRow.pullRequest?.kind === 'found' ? <Text wrap="truncate-end">{getPullRequestTitleLabel(selectedRow)}: {sanitizeInlineText(selectedRow.pullRequest.title)}</Text> : undefined}
-			<Text wrap="truncate-end">Tags: {formatTags(selectedRow.tags)}</Text>
-			<Text wrap="truncate-end">Action: {getActionMessage(selectedRow, activePath)}</Text>
-			<Text wrap="truncate-end">Notes: {getNotes(selectedRow)}</Text>
+			<Text color={getPullRequestColor(selectedRow)} dimColor={selectedRow.pullRequest?.kind === 'found' && selectedRow.pullRequest.state !== 'OPEN'} wrap="truncate-end">
+				{getPullRequestLabel(selectedRow)}: {formatPullRequest(selectedRow)}
+			</Text>
+			{pullRequestTitle ? <Text dimColor={selectedRow.pullRequest?.kind === 'found' && selectedRow.pullRequest.state !== 'OPEN'} wrap="truncate-end">{getPullRequestTitleLabel(selectedRow)}: {pullRequestTitle}</Text> : undefined}
+			<SectionHeader label="Action" />
+			<Text color={getActionColor(selectedRow)} wrap="truncate-end">
+				{actionMessage}
+			</Text>
+			<SectionHeader label="Notes" />
+			<Text dimColor wrap="truncate-end">
+				{getNotes(selectedRow)}
+			</Text>
 		</Box>
 	);
 }

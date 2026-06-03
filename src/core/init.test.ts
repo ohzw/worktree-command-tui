@@ -3,7 +3,7 @@ import {accessSync, mkdtempSync, readFileSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {parseInitArgs, runInit} from './init.js';
-import {CONFIG_FILE_NAME} from './config.js';
+import {CONFIG_FILE_NAME, LEGACY_CONFIG_FILE_NAME, parseJsonc} from './config.js';
 
 describe('runInit', () => {
 	it('creates a config file with defaults derived from project metadata', async () => {
@@ -18,9 +18,11 @@ describe('runInit', () => {
 		};
 		writeFileSync(path.join(root, 'package.json'), JSON.stringify(packageJson));
 		const result = await runInit({workspaceRoot: root, force: false});
-		const written = JSON.parse(readFileSync(result.path, 'utf8')) as Record<string, unknown>;
+		const source = readFileSync(result.path, 'utf8');
+		const written = parseJsonc(source) as Record<string, unknown>;
 
 		expect(result.path).toBe(path.join(root, CONFIG_FILE_NAME));
+		expect(source).toContain('// Command launched in the selected worktree.');
 		expect(written).toMatchObject({
 			namespace: 'example-app',
 			command: ['bun', 'run', 'dev'],
@@ -41,13 +43,20 @@ describe('runInit', () => {
 		};
 		writeFileSync(path.join(root, 'package.json'), JSON.stringify(packageJson));
 		const result = await runInit({workspaceRoot: root, force: true});
-		const written = JSON.parse(readFileSync(result.path, 'utf8')) as Record<string, unknown>;
+		const written = parseJsonc(readFileSync(result.path, 'utf8')) as Record<string, unknown>;
 		expect((written.command as string[])[2]).toBe('watch');
 	});
 
 	it('refuses to overwrite an existing config without --force', async () => {
 		const root = mkdtempSync(path.join(tmpdir(), 'wctui-init-existing-'));
 		const configPath = path.join(root, CONFIG_FILE_NAME);
+		writeFileSync(configPath, '{}');
+		expect(runInit({workspaceRoot: root, force: false})).rejects.toThrow(`Config file already exists: ${configPath}`);
+	});
+
+	it('refuses to overwrite a legacy json config without --force', async () => {
+		const root = mkdtempSync(path.join(tmpdir(), 'wctui-init-existing-legacy-'));
+		const configPath = path.join(root, LEGACY_CONFIG_FILE_NAME);
 		writeFileSync(configPath, '{}');
 		expect(runInit({workspaceRoot: root, force: false})).rejects.toThrow(`Config file already exists: ${configPath}`);
 	});

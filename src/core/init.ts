@@ -3,7 +3,7 @@ import {constants} from 'node:fs';
 import path from 'node:path';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {CONFIG_FILE_NAME, type ToolConfig} from './config.js';
+import {CONFIG_FILE_NAME, CONFIG_FILE_NAMES, type ToolConfig} from './config.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -115,6 +115,29 @@ export async function buildDefaultConfig(repoRoot: string): Promise<ToolConfig> 
 
 }
 
+export function renderConfigJsonc(config: ToolConfig): string {
+	return `{
+  // Session namespace used for git-common-dir state files and logs.
+  // Keep this filesystem-safe: letters, numbers, dots, underscores, and hyphens only.
+  "namespace": ${JSON.stringify(config.namespace)},
+
+  // Command launched in the selected worktree.
+  // Use argv form so spaces and shell metacharacters are passed safely.
+  "command": ${JSON.stringify(config.command)},
+
+  // TCP port owned by the command, used when stopping stale/orphaned processes.
+  "port": ${JSON.stringify(config.port)},
+
+  // Files that must exist in a worktree before the command can be started there.
+  "requiredFiles": ${JSON.stringify(config.requiredFiles)},
+
+  // Extra process command-line substrings treated as orphans for cleanup.
+  // Example: ["node --watch", "vite --host 0.0.0.0"]
+  "orphanMatchers": ${JSON.stringify(config.orphanMatchers)},
+}
+`;
+}
+
 export interface InitResult {
 	path: string;
 	config: ToolConfig;
@@ -125,14 +148,25 @@ export interface InitOptions {
 	force: boolean;
 }
 
+async function findExistingConfigPath(workspaceRoot: string): Promise<string | null> {
+	for (const fileName of CONFIG_FILE_NAMES) {
+		const configPath = path.join(workspaceRoot, fileName);
+		if (await fileExists(configPath)) {
+			return configPath;
+		}
+	}
+	return null;
+}
+
 export async function runInit(options: InitOptions): Promise<InitResult> {
 	const configPath = path.join(options.workspaceRoot, CONFIG_FILE_NAME);
-	if (!options.force && (await fileExists(configPath))) {
-		throw new Error(`Config file already exists: ${configPath}`);
+	const existingConfigPath = await findExistingConfigPath(options.workspaceRoot);
+	if (!options.force && existingConfigPath) {
+		throw new Error(`Config file already exists: ${existingConfigPath}`);
 	}
 
 	const config = await buildDefaultConfig(options.workspaceRoot);
-	await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+	await writeFile(configPath, renderConfigJsonc(config), 'utf8');
 	return {path: configPath, config};
 }
 

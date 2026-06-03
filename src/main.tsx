@@ -1,6 +1,6 @@
 import React from 'react';
 import {createConfigForRepo, parseInitArgs} from './core/init.js';
-import {CONFIG_FILE_NAME} from './core/config.js';
+import {CONFIG_FILE_NAME, CONFIG_FILE_NAMES} from './core/config.js';
 import {render} from 'ink';
 import {App} from './app.js';
 import {buildActions, buildInitialModel} from './core/runtime.js';
@@ -18,14 +18,14 @@ function printUsage(): void {
 
 function isConfigMissingError(error: unknown): boolean {
 	const err = error as {code?: string; path?: string};
-	return err.code === 'ENOENT' && typeof err.path === 'string' && err.path.endsWith(CONFIG_FILE_NAME);
+	return err.code === 'ENOENT' && typeof err.path === 'string' && CONFIG_FILE_NAMES.some(fileName => err.path?.endsWith(fileName));
 }
 
 function describeError(error: unknown): string {
 	if (error instanceof Error) {
 		if (isConfigMissingError(error)) {
 			return `${error.message}
-Run "worktree-command-tui init" to generate .worktree-command-tui.json before starting the TUI.`;
+Run "worktree-command-tui init" to generate ${CONFIG_FILE_NAME} before starting the TUI.`;
 		}
 		return error.message;
 	}

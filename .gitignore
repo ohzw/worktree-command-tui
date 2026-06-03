@@ -1,0 +1,10 @@
+dist/
+node_modules/
+.worktree-command-tui.json
+.worktree-command-tui.jsonc
+.npmrc
+coverage/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

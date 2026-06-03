@@ -31,9 +31,11 @@
     "start:built": "node dist/main.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
+    "prepare": "npm run build",
     "prepublishOnly": "npm run build"
   },
   "bin": {
+    "wctui": "./dist/main.js",
     "worktree-command-tui": "./dist/main.js"
   },
   "main": "./dist/main.js",

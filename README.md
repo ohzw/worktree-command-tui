@@ -29,7 +29,7 @@ npm install -g @ohzw/worktree-command-tui
 Run this once in a repository root (or any subdirectory of the repository):
 
 ```bash
-worktree-command-tui init
+wctui init
 ```
 
 This creates `.worktree-command-tui.jsonc` with a sensible default configuration.
@@ -37,16 +37,18 @@ This creates `.worktree-command-tui.jsonc` with a sensible default configuration
 To regenerate an existing configuration:
 
 ```bash
-worktree-command-tui init --force
+wctui init --force
 ```
 
 ### 2) Start the TUI
 
 ```bash
-worktree-command-tui
+wctui
 ```
 
-If no configuration file is found, the CLI will prompt you to run `worktree-command-tui init`.
+`worktree-command-tui` is still available as a compatibility alias.
+
+If no configuration file is found, the CLI will prompt you to run `wctui init`.
 
 ## Configuration
 

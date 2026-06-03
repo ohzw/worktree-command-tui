@@ -13,8 +13,9 @@ const [, , subcommand] = process.argv;
 
 function printUsage(): void {
 	console.log('Usage:');
-	console.log('  worktree-command-tui [args...]');
-	console.log('  worktree-command-tui init [--force]');
+	console.log('  wctui [args...]');
+	console.log('  wctui init [--force]');
+	console.log('  (alias: worktree-command-tui)');
 }
 
 function isConfigMissingError(error: unknown): boolean {
@@ -26,7 +27,7 @@ function describeError(error: unknown): string {
 	if (error instanceof Error) {
 		if (isConfigMissingError(error)) {
 			return `${error.message}
-Run "worktree-command-tui init" to generate ${CONFIG_FILE_NAME} before starting the TUI.`;
+Run "wctui init" to generate ${CONFIG_FILE_NAME} before starting the TUI.`;
 		}
 		return error.message;
 	}

@@ -1,5 +1,6 @@
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
+export const CONFIG_FILE_NAME = '.worktree-command-tui.json';
 
 export interface ToolConfig {
 	namespace: string;
@@ -28,7 +29,7 @@ function readStringList(value: unknown, fieldName: string): string[] {
 }
 
 export async function loadToolConfig({repoRoot}: {repoRoot: string}): Promise<ToolConfig> {
-	const filePath = path.join(repoRoot, '.worktree-command-tui.json');
+	const filePath = path.join(repoRoot, CONFIG_FILE_NAME);
 	const raw = JSON.parse(await readFile(filePath, 'utf8')) as Partial<ToolConfig>;
 
 	if (!Array.isArray(raw.command) || raw.command.length === 0 || raw.command.some(part => !isNonEmptyString(part))) {

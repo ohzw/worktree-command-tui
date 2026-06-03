@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "init": "tsx src/main.tsx init",
     "start": "tsx src/main.tsx",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

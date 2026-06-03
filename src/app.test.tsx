@@ -92,7 +92,7 @@ it('renders colored pane labels and active marker in the main layout', () => {
 	expect(lastFrame()).toContain('Worktrees');
 	expect(lastFrame()).toContain('Selection / Action');
 	expect(lastFrame()).toContain('idle');
-	expect(lastFrame()).toContain('Wheel/PgUp/PgDn selection scroll');
+	expect(lastFrame()).toContain('Wheel/PgUp/PgDn list & selection scroll');
 	expect(lastFrame()).toContain('* feat/a');
 });
 
@@ -235,6 +235,29 @@ it('scrolls selection details with SGR mouse wheel input', async () => {
 	await waitForInput();
 	await waitForInput();
 	expect(lastFrame()).toContain('Full Path: /repo/.worktree/feat-a');
+});
+
+it('scrolls worktree list with SGR mouse wheel input', async () => {
+	const model = createModel({
+		rows: Array.from({length: 12}, (_, index) => ({
+			path: `/repo/.worktree/feat-${index}`,
+			shortPath: `.worktree/feat-${index}`,
+			branch: `feat-${index}`,
+			tags: index === 0 ? ['active'] : [],
+		})),
+		activePath: '/repo/.worktree/feat-0',
+		activeBranch: 'feat-0',
+	});
+	const {lastFrame, stdin} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 16}} />,
+	);
+	expect(lastFrame()).not.toContain('feat-8');
+	expect(lastFrame()).toContain('│ > * feat-0');
+	stdin.write('\u001B[<65;10;5M');
+	await waitForInput();
+	await waitForInput();
+	expect(lastFrame()).toContain('│   - feat-3');
+	expect(lastFrame()).not.toContain('│ > - feat-0');
 });
 
 it('renders a minimal fallback shell on very short terminals', () => {

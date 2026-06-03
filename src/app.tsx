@@ -23,19 +23,35 @@ export interface AppWindowSize {
 const ENABLE_MOUSE_TRACKING = '\u001B[?1000h\u001B[?1006h';
 const DISABLE_MOUSE_TRACKING = '\u001B[?1000l\u001B[?1006l';
 
-export function getMouseWheelDelta(input: string): number {
-	let delta = 0;
-	const sgrMousePattern = /\u001B\[<(\d+);\d+;\d+[mM]/g;
+type MouseWheelEvent = {
+	readonly delta: -1 | 1;
+	readonly x?: number;
+	readonly y?: number;
+};
+
+function parseMouseWheelEvents(input: string): MouseWheelEvent[] {
+	const events: MouseWheelEvent[] = [];
+	const sgrMousePattern = /\u001B\[<(\d+);(\d+);(\d+)[mM]/g;
 	for (const match of input.matchAll(sgrMousePattern)) {
 		const button = Number(match[1]);
-		if (button === 64) {
-			delta -= 1;
+		if (button !== 64 && button !== 65) {
+			continue;
 		}
-		if (button === 65) {
-			delta += 1;
-		}
+
+		const x = Number(match[2]);
+		const y = Number(match[3]);
+		events.push({
+			delta: button === 65 ? 1 : -1,
+			x: Number.isFinite(x) ? x : undefined,
+			y: Number.isFinite(y) ? y : undefined,
+		});
 	}
-	return delta;
+
+	return events;
+}
+
+export function getMouseWheelDelta(input: string): number {
+	return parseMouseWheelEvents(input).reduce((sum, event) => sum + event.delta, 0);
 }
 
 function getNextSelectedPath(rows: AppModel['rows'], currentPath: string | null): string | null {
@@ -90,6 +106,7 @@ export function App({
 	const [model, setModel] = useState(initialModel);
 	const [selectedPath, setSelectedPath] = useState<string | null>(initialModel.rows[0]?.path ?? null);
 	const [selectionScrollOffset, setSelectionScrollOffset] = useState(0);
+	const [worktreeScrollOffset, setWorktreeScrollOffset] = useState(0);
 	const [completedAlert, setCompletedAlert] = useState<string | null>(null);
 	const inFlightRef = useRef(false);
 	const previousStatusRef = useRef<AppStatus['kind']>(initialModel.status.kind);
@@ -126,24 +143,12 @@ export function App({
 	}, []);
 
 	useEffect(() => {
-		const onData = (data: Buffer | string) => {
-			const wheelDelta = getMouseWheelDelta(typeof data === 'string' ? data : data.toString('utf8'));
-			if (wheelDelta !== 0) {
-				setSelectionScrollOffset(current => Math.max(0, current + wheelDelta * 3));
-			}
-		};
-
-		if (stdout.isTTY) {
-			stdout.write(ENABLE_MOUSE_TRACKING);
-		}
-		stdin.on('data', onData);
 		return () => {
-			stdin.off('data', onData);
-			if (stdout.isTTY) {
-				stdout.write(DISABLE_MOUSE_TRACKING);
+			if (alertTimeoutRef.current !== null) {
+				clearTimeout(alertTimeoutRef.current);
 			}
 		};
-	}, [stdin, stdout]);
+	}, []);
 
 	const selectedIndex = useMemo(() => {
 		if (selectedPath === null) {
@@ -254,6 +259,57 @@ export function App({
 		}
 	});
 
+	const listPaneViewportHeight = paneHeight === undefined ? undefined : Math.max(1, paneHeight - 3);
+	const mouseWheelLineStep = 3;
+
+	useEffect(() => {
+		const onData = (data: Buffer | string) => {
+			const events = parseMouseWheelEvents(typeof data === 'string' ? data : data.toString('utf8'));
+			for (const event of events) {
+				const shouldScrollWorktrees = !stackedLayout && (event.x === undefined || event.x <= listWidth + 1);
+				if (shouldScrollWorktrees) {
+					setWorktreeScrollOffset(current => {
+						if (listPaneViewportHeight === undefined) {
+							return 0;
+						}
+						const max = Math.max(0, model.rows.length - listPaneViewportHeight);
+						return Math.max(0, Math.min(max, current + event.delta * mouseWheelLineStep));
+					});
+				} else {
+					setSelectionScrollOffset(current => Math.max(0, current + event.delta * mouseWheelLineStep));
+				}
+			}
+		};
+
+		if (stdout.isTTY) {
+			stdout.write(ENABLE_MOUSE_TRACKING);
+		}
+		stdin.on('data', onData);
+		return () => {
+			stdin.off('data', onData);
+			if (stdout.isTTY) {
+				stdout.write(DISABLE_MOUSE_TRACKING);
+			}
+		};
+	}, [stdin, stdout, listWidth, stackedLayout, listPaneViewportHeight, mouseWheelLineStep, model.rows.length]);
+
+	useEffect(() => {
+		if (listPaneViewportHeight === undefined) {
+			setWorktreeScrollOffset(0);
+			return;
+		}
+		setWorktreeScrollOffset(current => {
+			const max = Math.max(0, model.rows.length - listPaneViewportHeight);
+			if (selectedIndex < current) {
+				return Math.max(0, selectedIndex);
+			}
+			if (selectedIndex >= current + listPaneViewportHeight) {
+				return Math.max(0, Math.min(max, selectedIndex - listPaneViewportHeight + 1));
+			}
+			return Math.min(current, max);
+		});
+	}, [selectedIndex, listPaneViewportHeight, model.rows.length]);
+
 	if (minimalLayout) {
 		return (
 			<Box width={rootWidth} height={rootHeight} flexDirection="column">
@@ -292,7 +348,14 @@ export function App({
 		<Box width={rootWidth} height={rootHeight} borderStyle="round" borderColor="gray" flexDirection="column" paddingX={1}>
 			<Header repoName={model.repoName} namespace={model.namespace} activeBranch={model.activeBranch} />
 			<Box flexDirection={stackedLayout ? 'column' : 'row'} flexGrow={stackedLayout ? 0 : 1} flexShrink={1}>
-				<WorktreeList rows={model.rows} selectedIndex={selectedIndex} width={stackedLayout ? bodyWidth : listWidth} height={paneHeight} stacked={stackedLayout} />
+				<WorktreeList
+					rows={model.rows}
+					selectedIndex={selectedIndex}
+					width={stackedLayout ? bodyWidth : listWidth}
+					height={paneHeight}
+					stacked={stackedLayout}
+					scrollOffset={worktreeScrollOffset}
+				/>
 				<ActionPanel selectedRow={selected} activePath={model.activePath} stacked={stackedLayout} width={stackedLayout ? bodyWidth : actionWidth} height={paneHeight} compactDetails={compactDetailPane} scrollOffset={selectionScrollOffset} />
 			</Box>
 			<ContextBar status={model.status} />

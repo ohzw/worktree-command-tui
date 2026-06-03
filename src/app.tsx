@@ -1,6 +1,6 @@
 import {Alert, Spinner} from '@inkjs/ui';
 import {useEffect, useMemo, useRef, useState} from 'react';
-import {Box, Text, useApp, useInput, useWindowSize} from 'ink';
+import {Box, Text, useApp, useInput, useStdin, useStdout, useWindowSize} from 'ink';
 import {ActionPanel} from './components/ActionPanel.js';
 import {ContextBar} from './components/ContextBar.js';
 import {Header} from './components/Header.js';
@@ -18,6 +18,24 @@ export interface ShellDimensions {
 export interface AppWindowSize {
 	columns: number;
 	rows: number;
+}
+
+const ENABLE_MOUSE_TRACKING = '\u001B[?1000h\u001B[?1006h';
+const DISABLE_MOUSE_TRACKING = '\u001B[?1000l\u001B[?1006l';
+
+export function getMouseWheelDelta(input: string): number {
+	let delta = 0;
+	const sgrMousePattern = /\u001B\[<(\d+);\d+;\d+[mM]/g;
+	for (const match of input.matchAll(sgrMousePattern)) {
+		const button = Number(match[1]);
+		if (button === 64) {
+			delta -= 1;
+		}
+		if (button === 65) {
+			delta += 1;
+		}
+	}
+	return delta;
 }
 
 function getNextSelectedPath(rows: AppModel['rows'], currentPath: string | null): string | null {
@@ -65,6 +83,8 @@ export function App({
 	windowSizeOverride?: AppWindowSize;
 }) {
 	const {exit} = useApp();
+	const {stdin} = useStdin();
+	const {stdout} = useStdout();
 	const liveWindowSize = useWindowSize();
 	const {columns, rows} = windowSizeOverride ?? liveWindowSize;
 	const [model, setModel] = useState(initialModel);
@@ -104,6 +124,26 @@ export function App({
 			}
 		};
 	}, []);
+
+	useEffect(() => {
+		const onData = (data: Buffer | string) => {
+			const wheelDelta = getMouseWheelDelta(typeof data === 'string' ? data : data.toString('utf8'));
+			if (wheelDelta !== 0) {
+				setSelectionScrollOffset(current => Math.max(0, current + wheelDelta * 3));
+			}
+		};
+
+		if (stdout.isTTY) {
+			stdout.write(ENABLE_MOUSE_TRACKING);
+		}
+		stdin.on('data', onData);
+		return () => {
+			stdin.off('data', onData);
+			if (stdout.isTTY) {
+				stdout.write(DISABLE_MOUSE_TRACKING);
+			}
+		};
+	}, [stdin, stdout]);
 
 	const selectedIndex = useMemo(() => {
 		if (selectedPath === null) {

@@ -262,6 +262,17 @@ function getPanelLines(selectedRow: AppRow | undefined, activePath: string | nul
 	return lines;
 }
 
+function getScrollbarThumbRows(totalLines: number, viewportHeight: number, scrollOffset: number): Set<number> {
+	if (totalLines <= viewportHeight) {
+		return new Set();
+	}
+
+	const thumbSize = Math.max(1, Math.floor((viewportHeight / totalLines) * viewportHeight));
+	const maxScrollOffset = Math.max(1, totalLines - viewportHeight);
+	const thumbStart = Math.round((scrollOffset / maxScrollOffset) * (viewportHeight - thumbSize));
+	return new Set(Array.from({length: thumbSize}, (_, index) => thumbStart + index));
+}
+
 export function ActionPanel({
 	selectedRow,
 	activePath,
@@ -287,6 +298,11 @@ export function ActionPanel({
 		? lines
 		: lines.slice(effectiveScrollOffset, effectiveScrollOffset + contentViewportHeight);
 
+	const showScrollbar = contentViewportHeight !== undefined && lines.length > contentViewportHeight;
+	const scrollbarThumbRows = showScrollbar
+		? getScrollbarThumbRows(lines.length, contentViewportHeight, effectiveScrollOffset)
+		: new Set<number>();
+
 	return (
 		<Box width={width} height={height} flexGrow={stacked ? 0 : 1} flexShrink={1} borderStyle="round" borderColor="magenta" flexDirection="column" paddingX={1} overflow="hidden">
 			<Text bold color="magenta" wrap="truncate-end">
@@ -294,9 +310,18 @@ export function ActionPanel({
 			</Text>
 			<Box height={contentViewportHeight} flexDirection="column" overflow="hidden">
 				{visibleLines.map((line, index) => (
-					<Text key={`${effectiveScrollOffset + index}-${line.text}`} color={line.color} dimColor={line.dimColor} bold={line.bold} wrap="truncate-end">
-						{line.text}
-					</Text>
+					<Box key={`${effectiveScrollOffset + index}-${line.text}`} flexDirection="row">
+						<Box flexGrow={1} flexShrink={1}>
+							<Text color={line.color} dimColor={line.dimColor} bold={line.bold} wrap="truncate-end">
+								{line.text}
+							</Text>
+						</Box>
+						{showScrollbar ? (
+							<Text color={scrollbarThumbRows.has(index) ? 'magenta' : 'gray'} dimColor={!scrollbarThumbRows.has(index)}>
+								{scrollbarThumbRows.has(index) ? '█' : '│'}
+							</Text>
+						) : null}
+					</Box>
 				))}
 			</Box>
 		</Box>

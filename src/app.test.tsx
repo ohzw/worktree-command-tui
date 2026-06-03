@@ -1,7 +1,7 @@
 import React from 'react';
 import {render} from 'ink-testing-library';
 import {expect, it, vi} from 'vitest';
-import {App, getShellDimensions, shouldStackPanes, shouldUseCompactLayout, shouldUseMinimalLayout} from './app.js';
+import {App, getMouseWheelDelta, getShellDimensions, shouldStackPanes, shouldUseCompactLayout, shouldUseMinimalLayout} from './app.js';
 import type {AppActions, AppModel, RowTag} from './core/runtime.js';
 import {APP_RENDER_OPTIONS} from './render-options.js';
 
@@ -45,6 +45,13 @@ it('never grows the shell beyond the available terminal viewport', () => {
 	expect(getShellDimensions(100, 30)).toEqual({rootWidth: 100, rootHeight: 30, bodyWidth: 96, listWidth: 32, actionWidth: 63});
 });
 
+it('parses SGR mouse wheel events', () => {
+	expect(getMouseWheelDelta('\u001B[<64;10;5M')).toBe(-1);
+	expect(getMouseWheelDelta('\u001B[<65;10;5M')).toBe(1);
+	expect(getMouseWheelDelta('\u001B[<65;10;5M\u001B[<65;10;5M')).toBe(2);
+	expect(getMouseWheelDelta('x')).toBe(0);
+});
+
 it('renders one fullscreen frame for each responsive layout', () => {
 	const model = createModel();
 	for (const windowSizeOverride of [
@@ -85,7 +92,7 @@ it('renders colored pane labels and active marker in the main layout', () => {
 	expect(lastFrame()).toContain('Worktrees');
 	expect(lastFrame()).toContain('Selection / Action');
 	expect(lastFrame()).toContain('idle');
-	expect(lastFrame()).toContain('PgUp/PgDn selection scroll');
+	expect(lastFrame()).toContain('Wheel/PgUp/PgDn selection scroll');
 	expect(lastFrame()).toContain('* feat/a');
 });
 
@@ -197,8 +204,34 @@ it('scrolls selection details when the pane is height constrained', async () => 
 		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 16}} />,
 	);
 	expect(lastFrame()).toContain('[Identity]');
+	expect(lastFrame()).toContain('█');
 	expect(lastFrame()).not.toContain('Full Path: /repo/.worktree/feat-a');
 	stdin.write('\u001B[6~');
+	await waitForInput();
+	await waitForInput();
+	expect(lastFrame()).toContain('Full Path: /repo/.worktree/feat-a');
+});
+
+it('scrolls selection details with SGR mouse wheel input', async () => {
+	const model = createModel({
+		rows: [{
+			path: '/repo/.worktree/feat-a',
+			shortPath: '.worktree/feat-a',
+			branch: 'feat/a',
+			tags: ['active'],
+			headSha: '46af3f1c',
+			upstream: {branch: 'origin/develop', ahead: 4, behind: 24},
+			workingTree: {staged: 1, unstaged: 2, untracked: 3, conflicts: 0},
+			pullRequest: {kind: 'found', number: 2125, title: 'Selection pane metadata', url: 'https://github.com/finn-inc/reclaim-the-forest/pull/2125', state: 'OPEN', isDraft: true, baseBranch: 'develop'},
+		}] as AppModel['rows'],
+		activePath: '/repo/.worktree/feat-a',
+		activeBranch: 'feat/a',
+	});
+	const {lastFrame, stdin} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 16}} />,
+	);
+	expect(lastFrame()).not.toContain('Full Path: /repo/.worktree/feat-a');
+	stdin.write('\u001B[<65;80;10M');
 	await waitForInput();
 	await waitForInput();
 	expect(lastFrame()).toContain('Full Path: /repo/.worktree/feat-a');

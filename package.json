@@ -1,12 +1,55 @@
 {
-  "name": "worktree-command-tui",
-  "private": true,
+  "name": "@ohzw/worktree-command-tui",
+  "version": "0.1.0",
+  "description": "A TUI for managing git worktrees",
+  "private": false,
   "type": "module",
+  "license": "MIT",
+  "author": "ohzw",
+  "homepage": "https://github.com/ohzw/worktree-command-tui#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ohzw/worktree-command-tui.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ohzw/worktree-command-tui/issues"
+  },
+  "keywords": [
+    "cli",
+    "git",
+    "worktree",
+    "tui",
+    "terminal"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
+    "build": "tsc --project tsconfig.build.json",
     "init": "tsx src/main.tsx init",
     "start": "tsx src/main.tsx",
+    "start:built": "node dist/main.js",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "bin": {
+    "worktree-command-tui": "./dist/main.js"
+  },
+  "main": "./dist/main.js",
+  "types": "./dist/main.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/main.js",
+      "default": "./dist/main.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "ink": "^7.0.4",

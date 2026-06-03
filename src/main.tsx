@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import React from 'react';
 import {createConfigForRepo, parseInitArgs} from './core/init.js';
 import {CONFIG_FILE_NAME, CONFIG_FILE_NAMES} from './core/config.js';

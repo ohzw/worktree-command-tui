@@ -65,7 +65,8 @@ it('switches to compact, stacked, and minimal layouts at the expected breakpoint
 	expect(shouldUseCompactLayout(30, 8, 1)).toBe(true);
 	expect(shouldUseCompactLayout(50, 16, 10)).toBe(true);
 	expect(shouldUseCompactLayout(72, 20, 10)).toBe(true);
-	expect(shouldUseCompactLayout(90, 22, 3)).toBe(true);
+	expect(shouldUseCompactLayout(90, 22, 3)).toBe(false);
+	expect(shouldUseCompactLayout(30, 30, 1)).toBe(false);
 	expect(shouldUseCompactLayout(120, 30, 3)).toBe(false);
 	expect(shouldStackPanes(90, 30, 3)).toBe(false);
 	expect(shouldStackPanes(90, 40, 3)).toBe(true);
@@ -85,6 +86,16 @@ it('renders colored pane labels and active marker in the main layout', () => {
 	expect(lastFrame()).toContain('idle');
 	expect(lastFrame()).toContain('Keys: ↑↓/jk move  g/G first/last  Enter start/switch  s stop  r refresh  q quit');
 	expect(lastFrame()).toContain('* feat/a');
+});
+
+it('keeps the pane layout on narrow terminals when vertical space is available', () => {
+	const model = createModel();
+	const {lastFrame} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 70, rows: 30}} />,
+	);
+	expect(lastFrame()).toContain('Worktrees');
+	expect(lastFrame()).toContain('Selection');
+	expect(lastFrame()).not.toContain('Resize terminal for split view');
 });
 
 it('keeps the selection pane width stable across selected worktrees', () => {

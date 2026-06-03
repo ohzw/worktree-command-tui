@@ -41,9 +41,9 @@ export function getShellDimensions(columns: number, rows: number): ShellDimensio
 	return {rootWidth, rootHeight, bodyWidth, listWidth, actionWidth};
 }
 
-export function shouldUseCompactLayout(columns: number, rows: number, worktreeCount = 0): boolean {
+export function shouldUseCompactLayout(_columns: number, rows: number, worktreeCount = 0): boolean {
 	const contentAwareRowFloor = Math.max(20, worktreeCount + 12);
-	return columns < 72 || rows <= contentAwareRowFloor || (columns < 96 && rows < 24);
+	return rows <= contentAwareRowFloor;
 }
 
 export function shouldUseMinimalLayout(columns: number, rows: number): boolean {

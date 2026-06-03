@@ -2,7 +2,7 @@ import path from 'node:path';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {loadToolConfig} from './config.js';
-import {readWorktrees, sortWorktrees, toShortPath} from './git-worktrees.js';
+import {readWorktrees, sortWorktrees, toShortPath, type WorktreeRow} from './git-worktrees.js';
 import {getInvalidReason} from './validation.js';
 import {getSessionPaths, readSessionRecord, writeSessionRecord, clearSessionRecord} from './session-store.js';
 import {startDetachedCommand} from './command-runner.js';
@@ -10,14 +10,47 @@ import {stopSessionWithFallback} from './process-control.js';
 import {isProcessGroupAlive, killProcessGroup, killPortOwner, killOrphans} from './posix-process.js';
 
 const execFileAsync = promisify(execFile);
+const SHORT_SHA_LENGTH = 8;
+const GH_TIMEOUT_MS = 2500;
 
 export type RowTag = 'main' | 'active' | 'invalid' | 'external' | 'legacy';
+
+export interface UpstreamInfo {
+	branch: string;
+	ahead: number;
+	behind: number;
+}
+
+export interface WorkingTreeInfo {
+	staged: number;
+	unstaged: number;
+	untracked: number;
+	conflicts: number;
+}
+
+export type PullRequestInfo =
+	| {
+		kind: 'found';
+		number: number;
+		title: string;
+		url: string;
+		state: 'OPEN' | 'CLOSED' | 'MERGED';
+		isDraft: boolean;
+		baseBranch: string;
+	}
+	| {kind: 'none'}
+	| {kind: 'unavailable'};
 
 export interface AppRow {
 	path: string;
 	shortPath: string;
 	branch: string;
+	headSha?: string;
 	tags: RowTag[];
+	upstream?: UpstreamInfo;
+	upstreamUnavailable?: boolean;
+	workingTree?: WorkingTreeInfo;
+	pullRequest?: PullRequestInfo;
 	invalidReason?: string;
 }
 
@@ -47,6 +80,151 @@ interface RepoContext {
 	gitCommonDir: string;
 }
 
+interface GitStatusSummary {
+	upstream?: UpstreamInfo;
+	upstreamUnavailable: boolean;
+	workingTree?: WorkingTreeInfo;
+}
+
+function shortenSha(headSha: string): string {
+	return headSha.slice(0, SHORT_SHA_LENGTH);
+}
+
+function createEmptyWorkingTree(): WorkingTreeInfo {
+	return {staged: 0, unstaged: 0, untracked: 0, conflicts: 0};
+}
+
+export function parseGitStatusSummary(output: string): GitStatusSummary {
+	const workingTree = createEmptyWorkingTree();
+	let upstreamBranch: string | undefined;
+	let ahead = 0;
+	let behind = 0;
+
+	for (const line of output.split('\n')) {
+		if (line.startsWith('# branch.upstream ')) {
+			upstreamBranch = line.slice('# branch.upstream '.length).trim();
+			continue;
+		}
+		if (line.startsWith('# branch.ab ')) {
+			const match = /# branch\.ab \+(\d+) -(\d+)/.exec(line);
+			ahead = Number(match?.[1] ?? 0);
+			behind = Number(match?.[2] ?? 0);
+			continue;
+		}
+		if (line.startsWith('1 ') || line.startsWith('2 ')) {
+			const [, xy = '..'] = line.split(' ', 3);
+			if (xy[0] !== '.') {
+				workingTree.staged += 1;
+			}
+			if (xy[1] !== '.') {
+				workingTree.unstaged += 1;
+			}
+			continue;
+		}
+		if (line.startsWith('u ')) {
+			workingTree.conflicts += 1;
+			continue;
+		}
+		if (line.startsWith('? ')) {
+			workingTree.untracked += 1;
+		}
+	}
+
+	return {
+		upstream: upstreamBranch ? {branch: upstreamBranch, ahead, behind} : undefined,
+		upstreamUnavailable: false,
+		workingTree,
+	};
+}
+
+async function readGitStatusSummary(cwd: string): Promise<GitStatusSummary> {
+	try {
+		const {stdout} = await execFileAsync('git', ['status', '--branch', '--porcelain=v2'], {cwd});
+		return parseGitStatusSummary(stdout);
+	} catch {
+		return {upstreamUnavailable: true};
+	}
+}
+
+async function readPullRequestList(
+	cwd: string,
+	branch: string,
+	state: 'all' | 'open',
+): Promise<Array<{
+	number: number;
+	title: string;
+	url: string;
+	state: 'OPEN' | 'CLOSED' | 'MERGED';
+	isDraft: boolean;
+	baseRefName: string;
+}>> {
+	const {stdout} = await execFileAsync(
+		'gh',
+		[
+			'pr',
+			'list',
+			'--head',
+			branch,
+			'--state',
+			state,
+			'--limit',
+			'1',
+			'--json',
+			'number,title,url,state,isDraft,baseRefName',
+		],
+		{cwd, timeout: GH_TIMEOUT_MS},
+	);
+	return JSON.parse(stdout) as Array<{
+		number: number;
+		title: string;
+		url: string;
+		state: 'OPEN' | 'CLOSED' | 'MERGED';
+		isDraft: boolean;
+		baseRefName: string;
+	}>;
+}
+async function readPullRequestInfo(cwd: string, branch: string): Promise<PullRequestInfo> {
+	if (branch.startsWith('(')) {
+		return {kind: 'none'};
+	}
+
+	try {
+		const openPullRequests = await readPullRequestList(cwd, branch, 'open');
+		const parsed = openPullRequests.length > 0 ? openPullRequests : await readPullRequestList(cwd, branch, 'all');
+		const pr = parsed[0];
+		if (!pr) {
+			return {kind: 'none'};
+		}
+		return {
+			kind: 'found',
+			number: pr.number,
+			title: pr.title,
+			url: pr.url,
+			state: pr.state,
+			isDraft: pr.isDraft,
+			baseBranch: pr.baseRefName,
+		};
+	} catch {
+		return {kind: 'unavailable'};
+	}
+}
+
+async function readRowMetadata(
+	worktreePath: string,
+	branch: string,
+): Promise<Pick<AppRow, 'upstream' | 'upstreamUnavailable' | 'workingTree' | 'pullRequest'>> {
+	const [statusSummary, pullRequest] = await Promise.all([
+		readGitStatusSummary(worktreePath),
+		readPullRequestInfo(worktreePath, branch),
+	]);
+	return {
+		upstream: statusSummary.upstream,
+		upstreamUnavailable: statusSummary.upstreamUnavailable,
+		workingTree: statusSummary.workingTree,
+		pullRequest,
+	};
+}
+
 async function resolveRepoContext(cwd: string): Promise<RepoContext> {
 	const [{stdout: workspaceRootRaw}, {stdout: gitCommonDirRaw}] = await Promise.all([
 		execFileAsync('git', ['rev-parse', '--show-toplevel'], {cwd}),
@@ -58,32 +236,51 @@ async function resolveRepoContext(cwd: string): Promise<RepoContext> {
 	return {workspaceRoot, mainWorktreePath, gitCommonDir};
 }
 
+export function toAppRow(
+	mainWorktreePath: string,
+	worktree: WorktreeRow,
+	activePath: string | null,
+	invalidReason: string | null,
+	metadata: Pick<AppRow, 'upstream' | 'upstreamUnavailable' | 'workingTree' | 'pullRequest'>,
+): AppRow {
+	const tags: RowTag[] = [];
+	if (worktree.isMain) {
+		tags.push('main');
+	}
+	if (activePath === worktree.path) {
+		tags.push('active');
+	}
+	if (worktree.isExternal) {
+		tags.push('external');
+	}
+	if (invalidReason) {
+		tags.push('invalid');
+	}
+
+	return {
+		path: worktree.path,
+		shortPath: toShortPath(mainWorktreePath, worktree.path),
+		branch: worktree.branch,
+		headSha: shortenSha(worktree.headSha),
+		tags,
+		upstream: metadata.upstream,
+		upstreamUnavailable: metadata.upstreamUnavailable,
+		workingTree: metadata.workingTree,
+		pullRequest: metadata.pullRequest,
+		invalidReason: invalidReason ?? undefined,
+	};
+}
+
 async function buildRows(mainWorktreePath: string, workspaceRoot: string, activePath: string | null, requiredFiles: string[]): Promise<AppRow[]> {
 	const worktrees = sortWorktrees(await readWorktrees(workspaceRoot, mainWorktreePath), activePath);
 	const rows = await Promise.all(
 		worktrees.map(async worktree => {
-			const invalidReason = await getInvalidReason(worktree.path, requiredFiles);
-			const tags: RowTag[] = [];
-			if (worktree.isMain) {
-				tags.push('main');
-			}
-			if (activePath === worktree.path) {
-				tags.push('active');
-			}
-			if (worktree.isExternal) {
-				tags.push('external');
-			}
-			if (invalidReason) {
-				tags.push('invalid');
-			}
+			const [invalidReason, metadata] = await Promise.all([
+				getInvalidReason(worktree.path, requiredFiles),
+				readRowMetadata(worktree.path, worktree.branch),
+			]);
 
-			return {
-				path: worktree.path,
-				shortPath: toShortPath(mainWorktreePath, worktree.path),
-				branch: worktree.branch,
-				tags,
-				invalidReason: invalidReason ?? undefined,
-			};
+			return toAppRow(mainWorktreePath, worktree, activePath, invalidReason, metadata);
 		}),
 	);
 	return rows;

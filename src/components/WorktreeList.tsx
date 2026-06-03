@@ -1,8 +1,16 @@
-import React from 'react';
 import {Box, Text} from 'ink';
 import type {AppRow} from '../core/runtime.js';
 
 const MIN_BRANCH_WIDTH = 24;
+
+function sanitizeInlineText(value: string): string {
+	return value
+		.replace(/[\r\n\t\u2028\u2029]+/g, ' ')
+		.replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
+		.replace(/\p{Cf}/gu, '')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
 
 function getIndicator(row: AppRow): string {
 	if (row.tags.includes('active')) {
@@ -74,7 +82,7 @@ export function WorktreeList({
 			</Text>
 			{rows.map((row, index) => {
 				const isSelected = index === selectedIndex;
-				const line = `${isSelected ? '>' : ' '} ${getIndicator(row)} ${truncateLabel(row.branch, branchWidth)}`;
+				const line = `${isSelected ? '>' : ' '} ${getIndicator(row)} ${truncateLabel(sanitizeInlineText(row.branch), branchWidth)}`;
 				return (
 					<Text key={row.path} color={getRowColor(row, isSelected)} dimColor={!isSelected && getRowColor(row, isSelected) === undefined} wrap="truncate-end">
 						{line}

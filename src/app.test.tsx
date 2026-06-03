@@ -179,7 +179,107 @@ it('truncates long branch and path values in the selection pane', () => {
 	});
 	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />);
 	expect(lastFrame()).toContain('Branch: feature/this-is-a-very-long-branch-name-that-wraps-and-keeps-go…');
-	expect(lastFrame()).toContain('Path: /repo/.worktree/feature/this/is/a/very/long/path/that/keeps/going…');
+	expect(lastFrame()).toContain('Path: .worktree/feature/long');
+	expect(lastFrame()).toContain('Full Path: /repo/.worktree/feature/this/is/a/very/long/path/that/keeps/…');
+});
+it('shows git and PR metadata in the selection pane', () => {
+	const model = createModel({
+		rows: [{
+			path: '/repo/.worktree/feat-a',
+			shortPath: '.worktree/feat-a',
+			branch: 'feat/a',
+			tags: ['active'],
+			headSha: '46af3f1c',
+			upstream: {branch: 'origin/develop', ahead: 4, behind: 24},
+			workingTree: {staged: 1, unstaged: 2, untracked: 3, conflicts: 0},
+			pullRequest: {kind: 'found', number: 2125, title: 'Selection pane metadata', url: 'https://github.com/finn-inc/reclaim-the-forest/pull/2125', state: 'OPEN', isDraft: true, baseBranch: 'develop'},
+		}] as AppModel['rows'],
+		activePath: '/repo/.worktree/feat-a',
+		activeBranch: 'feat/a',
+	});
+	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />);
+	expect(lastFrame()).toContain('Path: .worktree/feat-a');
+	expect(lastFrame()).toContain('HEAD: 46af3f1c');
+	expect(lastFrame()).toContain('Upstream: origin/develop (↑4 ↓24)');
+	expect(lastFrame()).toContain('Status: dirty (index 1 · worktree 2 · untracked 3)');
+	expect(lastFrame()).toContain('PR: #2125 draft/open → develop');
+	expect(lastFrame()).toContain('PR Title: Selection pane metadata');
+});
+it('shows unavailable metadata when git or gh inspection fails', () => {
+	const model = createModel({
+		rows: [{
+			path: '/repo/.worktree/feat-a',
+			shortPath: '.worktree/feat-a',
+			branch: 'feat/a',
+			tags: [],
+			upstreamUnavailable: true,
+			pullRequest: {kind: 'unavailable'},
+		}] as AppModel['rows'],
+		activePath: null,
+		activeBranch: null,
+	});
+	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />);
+	expect(lastFrame()).toContain('Upstream: unavailable');
+	expect(lastFrame()).toContain('Status: unavailable');
+	expect(lastFrame()).toContain('PR: unavailable');
+});
+it('keeps no-upstream metadata distinct from unavailable metadata', () => {
+	const model = createModel({
+		rows: [{
+			path: '/repo/.worktree/feat-a',
+			shortPath: '.worktree/feat-a',
+			branch: 'feat/a',
+			tags: [],
+			workingTree: {staged: 0, unstaged: 0, untracked: 0, conflicts: 0},
+			pullRequest: {kind: 'none'},
+		}] as AppModel['rows'],
+		activePath: null,
+		activeBranch: null,
+	});
+	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />);
+	expect(lastFrame()).toContain('Upstream: -');
+	expect(lastFrame()).toContain('Status: clean');
+	expect(lastFrame()).toContain('PR: none');
+});
+it('labels historical PR metadata explicitly', () => {
+	const model = createModel({
+		rows: [{
+			path: '/repo/.worktree/feat-a',
+			shortPath: '.worktree/feat-a',
+			branch: 'feat/a',
+			tags: [],
+			pullRequest: {kind: 'found', number: 2001, title: 'Already merged', url: 'https://github.com/finn-inc/reclaim-the-forest/pull/2001', state: 'MERGED', isDraft: false, baseBranch: 'develop'},
+		}] as AppModel['rows'],
+		activePath: null,
+		activeBranch: null,
+	});
+	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />);
+	expect(lastFrame()).toContain('Last PR: #2001 merged → develop');
+	expect(lastFrame()).toContain('Last PR Title: Already merged');
+});
+it('sanitizes PR titles before rendering them into the terminal', () => {
+	const model = createModel({
+		rows: [{
+			path: '/repo/.worktree/feat-a \u2066next',
+			shortPath: '.worktree/feat-a \u2066next',
+			branch: 'feat/\u202Ebad',
+			tags: [],
+			upstream: {branch: 'origin/devel\u2028op', ahead: 1, behind: 2},
+			pullRequest: {kind: 'found', number: 2125, title: 'bad\nline\u001b[2J\u2028more \u202Ertl', url: 'https://github.com/finn-inc/reclaim-the-forest/pull/2125', state: 'OPEN', isDraft: false, baseBranch: 'devel\u2066op'},
+		}] as AppModel['rows'],
+		activePath: null,
+		activeBranch: null,
+	});
+	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />);
+	expect(lastFrame()).toContain('Branch: feat/bad');
+	expect(lastFrame()).toContain('Path: .worktree/feat-a next');
+	expect(lastFrame()).toContain('Full Path: /repo/.worktree/feat-a next');
+	expect(lastFrame()).toContain('Upstream: origin/devel op (↑1 ↓2)');
+	expect(lastFrame()).toContain('PR: #2125 open → develop');
+	expect(lastFrame()).toContain('PR Title: bad line[2J more rtl');
+	expect(lastFrame()).not.toContain('\u001b');
+	expect(lastFrame()).not.toContain('\u202e');
+	expect(lastFrame()).not.toContain('\u2066');
 });
 
 it('shows invalid reason in the detail pane before start is attempted', () => {
@@ -258,7 +358,7 @@ it('keeps the same worktree selected when start reorders the list', async () => 
 	stdin.write('\r');
 	await waitForInput();
 	expect(lastFrame()).toContain('Active: feat/b');
-	expect(lastFrame()).toContain('Path: /repo/.worktree/feat-b');
+	expect(lastFrame()).toContain('Path: .worktree/feat-b');
 	expect(lastFrame()).toContain('Action: Already active. Press s to stop the current session.');
 });
 

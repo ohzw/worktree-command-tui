@@ -59,12 +59,13 @@ it('renders one fullscreen frame for each responsive layout', () => {
 	}
 });
 
-it('switches to compact, stacked, and minimal layouts at the expected breakpoints', () => {
+it('switches to stacked and minimal layouts at the expected breakpoints', () => {
 	expect(shouldUseMinimalLayout(8, 4)).toBe(true);
-	expect(shouldUseMinimalLayout(30, 8)).toBe(false);
-	expect(shouldUseCompactLayout(30, 8, 1)).toBe(true);
-	expect(shouldUseCompactLayout(50, 16, 10)).toBe(true);
-	expect(shouldUseCompactLayout(72, 20, 10)).toBe(true);
+	expect(shouldUseMinimalLayout(30, 8)).toBe(true);
+	expect(shouldUseMinimalLayout(30, 12)).toBe(false);
+	expect(shouldUseCompactLayout(30, 8, 1)).toBe(false);
+	expect(shouldUseCompactLayout(50, 16, 10)).toBe(false);
+	expect(shouldUseCompactLayout(72, 20, 10)).toBe(false);
 	expect(shouldUseCompactLayout(90, 22, 3)).toBe(false);
 	expect(shouldUseCompactLayout(30, 30, 1)).toBe(false);
 	expect(shouldUseCompactLayout(120, 30, 3)).toBe(false);
@@ -84,7 +85,7 @@ it('renders colored pane labels and active marker in the main layout', () => {
 	expect(lastFrame()).toContain('Worktrees');
 	expect(lastFrame()).toContain('Selection / Action');
 	expect(lastFrame()).toContain('idle');
-	expect(lastFrame()).toContain('Keys: ↑↓/jk move  g/G first/last  Enter start/switch  s stop  r refresh  q quit');
+	expect(lastFrame()).toContain('PgUp/PgDn selection scroll');
 	expect(lastFrame()).toContain('* feat/a');
 });
 
@@ -149,7 +150,6 @@ it('uses split layout when the stacked breakpoint no longer applies', () => {
 		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 90, rows: 26}} />,
 	);
 	expect(lastFrame()).toContain('[Action]');
-	expect(lastFrame()).toContain('[Notes]');
 	expect(lastFrame()).not.toContain('Full Path:');
 	expect(lastFrame()).not.toContain('Tags:');
 	expect(lastFrame()).not.toContain('PR Title:');
@@ -178,16 +178,42 @@ it('keeps rich detail rows on medium split terminals', () => {
 
 });
 
-it('renders a compact fallback shell on short terminals', () => {
-	const model = createModel({rows: [{path: '/repo', shortPath: '.', branch: 'develop', tags: ['main']}], activePath: '/repo', activeBranch: 'develop'});
-	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 30, rows: 8}} />);
-	expect(lastFrame()).toContain('Active: develop');
-	expect(lastFrame()).toContain('Selected: develop');
-	expect(lastFrame()).toContain('idle — ready');
-	expect(lastFrame()).toContain('Keys: ↑↓/jk g/G ↵ s r q');
+it('scrolls selection details when the pane is height constrained', async () => {
+	const model = createModel({
+		rows: [{
+			path: '/repo/.worktree/feat-a',
+			shortPath: '.worktree/feat-a',
+			branch: 'feat/a',
+			tags: ['active'],
+			headSha: '46af3f1c',
+			upstream: {branch: 'origin/develop', ahead: 4, behind: 24},
+			workingTree: {staged: 1, unstaged: 2, untracked: 3, conflicts: 0},
+			pullRequest: {kind: 'found', number: 2125, title: 'Selection pane metadata', url: 'https://github.com/finn-inc/reclaim-the-forest/pull/2125', state: 'OPEN', isDraft: true, baseBranch: 'develop'},
+		}] as AppModel['rows'],
+		activePath: '/repo/.worktree/feat-a',
+		activeBranch: 'feat/a',
+	});
+	const {lastFrame, stdin} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 16}} />,
+	);
+	expect(lastFrame()).toContain('[Identity]');
+	expect(lastFrame()).not.toContain('Full Path: /repo/.worktree/feat-a');
+	stdin.write('\u001B[6~');
+	await waitForInput();
+	await waitForInput();
+	expect(lastFrame()).toContain('Full Path: /repo/.worktree/feat-a');
 });
 
-it('shows completion alert in compact layout', async () => {
+it('renders a minimal fallback shell on very short terminals', () => {
+	const model = createModel({rows: [{path: '/repo', shortPath: '.', branch: 'develop', tags: ['main']}], activePath: '/repo', activeBranch: 'develop'});
+	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 30, rows: 8}} />);
+	expect(lastFrame()).toContain('A:develop');
+	expect(lastFrame()).toContain('S:develop');
+	expect(lastFrame()).toContain('T:idle');
+	expect(lastFrame()).toContain('↑↓jk↵q');
+});
+
+it('shows completion alert after starting a worktree', async () => {
 	const model = createModel({
 		rows: [{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: []}],
 		activePath: null,

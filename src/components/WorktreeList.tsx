@@ -58,11 +58,13 @@ export function WorktreeList({
 	rows,
 	selectedIndex,
 	width,
+	height,
 	stacked,
 }: {
 	rows: AppRow[];
 	selectedIndex: number;
 	width?: number;
+	height?: number;
 	stacked: boolean;
 }) {
 	const branchWidth = Math.max(MIN_BRANCH_WIDTH, (width ?? 34) - 7);
@@ -70,12 +72,14 @@ export function WorktreeList({
 	return (
 		<Box
 			width={width}
+			height={height}
 			flexGrow={stacked ? 0 : 1}
 			marginRight={stacked ? 0 : 1}
 			borderStyle="round"
 			borderColor="cyan"
 			flexDirection="column"
 			paddingX={1}
+			overflowY="hidden"
 		>
 			<Text bold color="cyan">
 				Worktrees

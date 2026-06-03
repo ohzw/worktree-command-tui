@@ -41,13 +41,12 @@ export function getShellDimensions(columns: number, rows: number): ShellDimensio
 	return {rootWidth, rootHeight, bodyWidth, listWidth, actionWidth};
 }
 
-export function shouldUseCompactLayout(_columns: number, rows: number, worktreeCount = 0): boolean {
-	const contentAwareRowFloor = Math.max(20, worktreeCount + 12);
-	return rows <= contentAwareRowFloor;
+export function shouldUseCompactLayout(_columns: number, _rows: number, _worktreeCount = 0): boolean {
+	return false;
 }
 
 export function shouldUseMinimalLayout(columns: number, rows: number): boolean {
-	return columns < 20 || rows < 6;
+	return columns < 20 || rows < 10;
 }
 
 export function shouldStackPanes(columns: number, rows: number, worktreeCount = 0): boolean {
@@ -70,6 +69,7 @@ export function App({
 	const {columns, rows} = windowSizeOverride ?? liveWindowSize;
 	const [model, setModel] = useState(initialModel);
 	const [selectedPath, setSelectedPath] = useState<string | null>(initialModel.rows[0]?.path ?? null);
+	const [selectionScrollOffset, setSelectionScrollOffset] = useState(0);
 	const [completedAlert, setCompletedAlert] = useState<string | null>(null);
 	const inFlightRef = useRef(false);
 	const previousStatusRef = useRef<AppStatus['kind']>(initialModel.status.kind);
@@ -78,6 +78,10 @@ export function App({
 	useEffect(() => {
 		setSelectedPath(currentPath => getNextSelectedPath(model.rows, currentPath));
 	}, [model.rows]);
+
+	useEffect(() => {
+		setSelectionScrollOffset(0);
+	}, [selectedPath]);
 
 	useEffect(() => {
 		const becameRunning = previousStatusRef.current === 'starting' && model.status.kind === 'running';
@@ -114,6 +118,8 @@ export function App({
 	const compactLayout = !minimalLayout && shouldUseCompactLayout(rootWidth, rootHeight, model.rows.length);
 	const stackedLayout = !minimalLayout && !compactLayout && shouldStackPanes(rootWidth, rootHeight, model.rows.length);
 	const compactDetailPane = !stackedLayout && rootHeight <= 30 && model.rows.length > 1;
+	const paneHeight = stackedLayout ? undefined : Math.max(3, rootHeight - 11);
+	const selectionScrollPageSize = Math.max(1, Math.floor((paneHeight ?? rootHeight) / 2));
 
 	function moveSelection(nextIndex: number): void {
 		if (model.rows.length === 0) {
@@ -167,6 +173,14 @@ export function App({
 		}
 		if (input === 'G') {
 			moveSelection(model.rows.length - 1);
+			return;
+		}
+		if (key.pageDown) {
+			setSelectionScrollOffset(current => current + selectionScrollPageSize);
+			return;
+		}
+		if (key.pageUp) {
+			setSelectionScrollOffset(current => Math.max(0, current - selectionScrollPageSize));
 			return;
 		}
 		if (inFlightRef.current) {
@@ -238,8 +252,8 @@ export function App({
 		<Box width={rootWidth} height={rootHeight} borderStyle="round" borderColor="gray" flexDirection="column" paddingX={1}>
 			<Header repoName={model.repoName} namespace={model.namespace} activeBranch={model.activeBranch} />
 			<Box flexDirection={stackedLayout ? 'column' : 'row'} flexGrow={stackedLayout ? 0 : 1} flexShrink={1}>
-				<WorktreeList rows={model.rows} selectedIndex={selectedIndex} width={stackedLayout ? bodyWidth : listWidth} stacked={stackedLayout} />
-				<ActionPanel selectedRow={selected} activePath={model.activePath} stacked={stackedLayout} width={stackedLayout ? bodyWidth : actionWidth} compactDetails={compactDetailPane} />
+				<WorktreeList rows={model.rows} selectedIndex={selectedIndex} width={stackedLayout ? bodyWidth : listWidth} height={paneHeight} stacked={stackedLayout} />
+				<ActionPanel selectedRow={selected} activePath={model.activePath} stacked={stackedLayout} width={stackedLayout ? bodyWidth : actionWidth} height={paneHeight} compactDetails={compactDetailPane} scrollOffset={selectionScrollOffset} />
 			</Box>
 			<ContextBar status={model.status} />
 			{completedAlert ? (

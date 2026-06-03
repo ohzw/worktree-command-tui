@@ -1,5 +1,4 @@
 import {Box, Text} from 'ink';
-import {Badge, StatusMessage} from '@inkjs/ui';
 import type {AppRow} from '../core/runtime.js';
 
 function getTagColor(tag: string): 'green' | 'yellow' | 'blue' | 'red' | 'magenta' {
@@ -156,18 +155,6 @@ function getNotes(selectedRow: AppRow): string {
 	return 'Ready to launch with the configured command in this worktree.';
 }
 
-function SectionHeader({label}: {label: string}) {
-	return (
-		<Text bold color="cyan">
-			[{label}]
-		</Text>
-	);
-}
-
-function SectionDivider() {
-	return <Text dimColor> </Text>;
-}
-
 function getOrderedTags(tags: readonly string[]): string[] {
 	const tagPriority: Record<string, number> = {
 		active: 0,
@@ -185,77 +172,133 @@ function getOrderedTags(tags: readonly string[]): string[] {
 	});
 }
 
-export function ActionPanel({
-	selectedRow,
-	activePath,
-	stacked,
-	width,
-	compactDetails,
-}: {
-	selectedRow: AppRow | undefined;
-	activePath: string | null;
-	stacked: boolean;
-	width?: number;
-	compactDetails?: boolean;
-}) {
+type LineSpec = {
+	text: string;
+	color?: 'cyan' | 'green' | 'yellow' | 'blue' | 'red' | 'magenta';
+	dimColor?: boolean;
+	bold?: boolean;
+};
+
+function getVariantColor(variant: 'success' | 'error' | 'info'): 'green' | 'red' | 'blue' {
+	if (variant === 'success') {
+		return 'green';
+	}
+	if (variant === 'error') {
+		return 'red';
+	}
+	return 'blue';
+}
+
+function getVariantIcon(variant: 'success' | 'error' | 'info'): '✓' | '✘' | 'ℹ' {
+	if (variant === 'success') {
+		return '✓';
+	}
+	if (variant === 'error') {
+		return '✘';
+	}
+	return 'ℹ';
+}
+
+function section(label: string): LineSpec {
+	return {text: `[${label}]`, color: 'cyan', bold: true};
+}
+
+function divider(): LineSpec {
+	return {text: ' ', dimColor: true};
+}
+
+function getPanelLines(selectedRow: AppRow | undefined, activePath: string | null, compactDetails: boolean): LineSpec[] {
 	if (!selectedRow) {
-		return (
-			<Box width={width} flexGrow={stacked ? 0 : 1} flexShrink={1} borderStyle="round" borderColor="magenta" flexDirection="column" paddingX={1}>
-				<Text bold color="magenta">
-					Selection / Action
-				</Text>
-				<Text dimColor>No worktrees found.</Text>
-			</Box>
-		);
+		return [{text: 'No worktrees found.', dimColor: true}];
 	}
 
-	const actionMessage = getActionMessage(selectedRow, activePath);
+	const lines: LineSpec[] = [section('Identity')];
 	const showFullPath = !compactDetails && selectedRow.shortPath !== selectedRow.path;
 	const showTags = !compactDetails;
 	const pullRequestTitle = selectedRow.pullRequest?.kind === 'found' && !compactDetails
 		? sanitizeInlineText(selectedRow.pullRequest.title)
 		: null;
 
+	lines.push(
+		{text: `Branch: ${sanitizeInlineText(selectedRow.branch)}`, bold: true},
+		{text: `Path: ${sanitizeInlineText(selectedRow.shortPath)}`},
+	);
+	if (showFullPath) {
+		lines.push({text: `Full Path: ${sanitizeInlineText(selectedRow.path)}`});
+	}
+	lines.push({text: `HEAD: ${selectedRow.headSha || '-'}`});
+
+	if (showTags) {
+		for (const tag of getOrderedTags(selectedRow.tags.filter(tag => tag !== 'active'))) {
+			lines.push({text: tag.toUpperCase(), color: getTagColor(tag)});
+		}
+	}
+
+	lines.push(
+		divider(),
+		section('Git / PR'),
+		{text: `Upstream: ${formatUpstream(selectedRow)}`},
+		{text: `Status: ${formatWorkingTree(selectedRow)}`},
+		{
+			text: `${getPullRequestLabel(selectedRow)}: ${formatPullRequest(selectedRow)}`,
+			color: getPullRequestColor(selectedRow),
+			dimColor: selectedRow.pullRequest?.kind === 'found' && selectedRow.pullRequest.state !== 'OPEN',
+		},
+	);
+	if (pullRequestTitle) {
+		lines.push({text: `${getPullRequestTitleLabel(selectedRow)}: ${pullRequestTitle}`, dimColor: selectedRow.pullRequest?.kind === 'found' && selectedRow.pullRequest.state !== 'OPEN'});
+	}
+
+	const actionVariant = getActionVariant(selectedRow, activePath);
+	const noteVariant = getNoteVariant(selectedRow);
+	lines.push(
+		divider(),
+		section('Action'),
+		{text: `${getVariantIcon(actionVariant)} ${getActionMessage(selectedRow, activePath)}`, color: getVariantColor(actionVariant)},
+		section('Notes'),
+		{text: `${getVariantIcon(noteVariant)} ${getNotes(selectedRow)}`, color: getVariantColor(noteVariant)},
+	);
+
+	return lines;
+}
+
+export function ActionPanel({
+	selectedRow,
+	activePath,
+	stacked,
+	width,
+	height,
+	compactDetails,
+	scrollOffset = 0,
+}: {
+	selectedRow: AppRow | undefined;
+	activePath: string | null;
+	stacked: boolean;
+	width?: number;
+	height?: number;
+	compactDetails?: boolean;
+	scrollOffset?: number;
+}) {
+	const lines = getPanelLines(selectedRow, activePath, compactDetails ?? false);
+	const contentViewportHeight = height === undefined ? undefined : Math.max(1, height - 3);
+	const maxScrollOffset = contentViewportHeight === undefined ? 0 : Math.max(0, lines.length - contentViewportHeight);
+	const effectiveScrollOffset = Math.min(Math.max(scrollOffset, 0), maxScrollOffset);
+	const visibleLines = contentViewportHeight === undefined
+		? lines
+		: lines.slice(effectiveScrollOffset, effectiveScrollOffset + contentViewportHeight);
+
 	return (
-		<Box width={width} flexGrow={stacked ? 0 : 1} flexShrink={1} borderStyle="round" borderColor="magenta" flexDirection="column" paddingX={1}>
-			<Text bold color="magenta">
+		<Box width={width} height={height} flexGrow={stacked ? 0 : 1} flexShrink={1} borderStyle="round" borderColor="magenta" flexDirection="column" paddingX={1} overflow="hidden">
+			<Text bold color="magenta" wrap="truncate-end">
 				Selection / Action
 			</Text>
-			<SectionHeader label="Identity" />
-			<Text bold wrap="truncate-end">
-				Branch: {sanitizeInlineText(selectedRow.branch)}
-			</Text>
-			<Text wrap="truncate-end">Path: {sanitizeInlineText(selectedRow.shortPath)}</Text>
-			{showFullPath ? <Text wrap="truncate-end">Full Path: {sanitizeInlineText(selectedRow.path)}</Text> : undefined}
-			<Text wrap="truncate-end">HEAD: {selectedRow.headSha || '-'}</Text>
-			{showTags ? (() => {
-				const visibleTags = getOrderedTags(selectedRow.tags.filter(tag => tag !== 'active'));
-				if (visibleTags.length === 0) {
-					return null;
-				}
-				return (
-					<Box flexDirection="column" gap={1}>
-						{visibleTags.map(tag => (
-							<Box key={tag} flexDirection="row" gap={1}>
-								<Badge color={getTagColor(tag)}>{tag}</Badge>
-							</Box>
-						))}
-					</Box>
-				);
-			})() : undefined}
-			<SectionDivider />
-			<SectionHeader label="Git / PR" />
-			<Text wrap="truncate-end">Upstream: {formatUpstream(selectedRow)}</Text>
-			<Text wrap="truncate-end">Status: {formatWorkingTree(selectedRow)}</Text>
-			<Text color={getPullRequestColor(selectedRow)} dimColor={selectedRow.pullRequest?.kind === 'found' && selectedRow.pullRequest.state !== 'OPEN'} wrap="truncate-end">
-				{getPullRequestLabel(selectedRow)}: {formatPullRequest(selectedRow)}
-			</Text>
-			{pullRequestTitle ? <Text dimColor={selectedRow.pullRequest?.kind === 'found' && selectedRow.pullRequest.state !== 'OPEN'} wrap="truncate-end">{getPullRequestTitleLabel(selectedRow)}: {pullRequestTitle}</Text> : undefined}
-			<SectionDivider />
-			<SectionHeader label="Action" />
-			<StatusMessage variant={getActionVariant(selectedRow, activePath)}>{actionMessage}</StatusMessage>
-			<SectionHeader label="Notes" />
-			<StatusMessage variant={getNoteVariant(selectedRow)}>{getNotes(selectedRow)}</StatusMessage>
+			<Box height={contentViewportHeight} flexDirection="column" overflow="hidden">
+				{visibleLines.map((line, index) => (
+					<Text key={`${effectiveScrollOffset + index}-${line.text}`} color={line.color} dimColor={line.dimColor} bold={line.bold} wrap="truncate-end">
+						{line.text}
+					</Text>
+				))}
+			</Box>
 		</Box>
 	);
 }

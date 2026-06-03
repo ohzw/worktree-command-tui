@@ -1,8 +1,57 @@
 import {Box, Text} from 'ink';
 import type {AppRow} from '../core/runtime.js';
 
-function formatTags(tags: AppRow['tags']): string {
-	return tags.length === 0 ? '-' : tags.join(' · ');
+function getTagColor(tag: string): 'green' | 'yellow' | 'blue' | 'red' | 'magenta' {
+	if (tag === 'active') {
+		return 'green';
+	}
+	if (tag === 'external') {
+		return 'yellow';
+	}
+	if (tag === 'main') {
+		return 'blue';
+	}
+	if (tag === 'invalid') {
+		return 'red';
+	}
+	return 'magenta';
+}
+
+export function getActionVariant(selectedRow: AppRow, activePath: string | null): 'success' | 'error' | 'info' {
+	if (selectedRow.invalidReason) {
+		return 'error';
+	}
+	if (selectedRow.path === activePath) {
+		return 'success';
+	}
+	if ((selectedRow.workingTree?.conflicts ?? 0) > 0) {
+		return 'error';
+	}
+	if (
+		(selectedRow.workingTree?.staged ?? 0) > 0
+		|| (selectedRow.workingTree?.unstaged ?? 0) > 0
+		|| (selectedRow.workingTree?.untracked ?? 0) > 0
+	) {
+		return 'info';
+	}
+	return 'info';
+}
+
+function getNoteVariant(selectedRow: AppRow): 'success' | 'error' | 'info' {
+	if (selectedRow.invalidReason || selectedRow.tags.includes('external')) {
+		return selectedRow.invalidReason ? 'error' : 'info';
+	}
+	if ((selectedRow.workingTree?.conflicts ?? 0) > 0) {
+		return 'error';
+	}
+	if (
+		(selectedRow.workingTree?.staged ?? 0) > 0
+		|| (selectedRow.workingTree?.unstaged ?? 0) > 0
+		|| (selectedRow.workingTree?.untracked ?? 0) > 0
+	) {
+		return 'info';
+	}
+	return 'info';
 }
 
 function sanitizeInlineText(value: string): string {
@@ -96,23 +145,6 @@ function getActionMessage(selectedRow: AppRow, activePath: string | null): strin
 	return 'Press Enter to start here and switch the active session.';
 }
 
-export function getActionColor(selectedRow: AppRow): 'yellow' | 'red' | undefined {
-	if (selectedRow.invalidReason) {
-		return 'red';
-	}
-	if ((selectedRow.workingTree?.conflicts ?? 0) > 0) {
-		return 'red';
-	}
-	if (
-		(selectedRow.workingTree?.staged ?? 0) > 0
-		|| (selectedRow.workingTree?.unstaged ?? 0) > 0
-		|| (selectedRow.workingTree?.untracked ?? 0) > 0
-	) {
-		return 'yellow';
-	}
-	return undefined;
-}
-
 function getNotes(selectedRow: AppRow): string {
 	if (selectedRow.invalidReason) {
 		return selectedRow.invalidReason;
@@ -120,18 +152,125 @@ function getNotes(selectedRow: AppRow): string {
 	if (selectedRow.tags.includes('external')) {
 		return 'External worktree managed outside the main checkout path.';
 	}
-	if (selectedRow.tags.includes('active')) {
-		return 'This worktree currently owns the running command session.';
-	}
 	return 'Ready to launch with the configured command in this worktree.';
 }
 
-function SectionHeader({label}: {label: string}) {
-	return (
-		<Text bold color="cyan">
-			[{label}]
-		</Text>
+function getOrderedTags(tags: readonly string[]): string[] {
+	const tagPriority: Record<string, number> = {
+		active: 0,
+		main: 1,
+		external: 2,
+		invalid: 3,
+	};
+	return [...tags].sort((a, b) => {
+		const aPriority = tagPriority[a] ?? 10;
+		const bPriority = tagPriority[b] ?? 10;
+		if (aPriority === bPriority) {
+			return a.localeCompare(b);
+		}
+		return aPriority - bPriority;
+	});
+}
+
+type LineSpec = {
+	text: string;
+	color?: 'cyan' | 'green' | 'yellow' | 'blue' | 'red' | 'magenta';
+	dimColor?: boolean;
+	bold?: boolean;
+};
+
+function getVariantColor(variant: 'success' | 'error' | 'info'): 'green' | 'red' | 'blue' {
+	if (variant === 'success') {
+		return 'green';
+	}
+	if (variant === 'error') {
+		return 'red';
+	}
+	return 'blue';
+}
+
+function getVariantIcon(variant: 'success' | 'error' | 'info'): '✓' | '✘' | 'ℹ' {
+	if (variant === 'success') {
+		return '✓';
+	}
+	if (variant === 'error') {
+		return '✘';
+	}
+	return 'ℹ';
+}
+
+function section(label: string): LineSpec {
+	return {text: `[${label}]`, color: 'cyan', bold: true};
+}
+
+function divider(): LineSpec {
+	return {text: ' ', dimColor: true};
+}
+
+function getPanelLines(selectedRow: AppRow | undefined, activePath: string | null, compactDetails: boolean): LineSpec[] {
+	if (!selectedRow) {
+		return [{text: 'No worktrees found.', dimColor: true}];
+	}
+
+	const lines: LineSpec[] = [section('Identity')];
+	const showFullPath = !compactDetails && selectedRow.shortPath !== selectedRow.path;
+	const showTags = !compactDetails;
+	const pullRequestTitle = selectedRow.pullRequest?.kind === 'found' && !compactDetails
+		? sanitizeInlineText(selectedRow.pullRequest.title)
+		: null;
+
+	lines.push(
+		{text: `Branch: ${sanitizeInlineText(selectedRow.branch)}`, bold: true},
+		{text: `Path: ${sanitizeInlineText(selectedRow.shortPath)}`},
 	);
+	if (showFullPath) {
+		lines.push({text: `Full Path: ${sanitizeInlineText(selectedRow.path)}`});
+	}
+	lines.push({text: `HEAD: ${selectedRow.headSha || '-'}`});
+
+	if (showTags) {
+		for (const tag of getOrderedTags(selectedRow.tags.filter(tag => tag !== 'active'))) {
+			lines.push({text: tag.toUpperCase(), color: getTagColor(tag)});
+		}
+	}
+
+	lines.push(
+		divider(),
+		section('Git / PR'),
+		{text: `Upstream: ${formatUpstream(selectedRow)}`},
+		{text: `Status: ${formatWorkingTree(selectedRow)}`},
+		{
+			text: `${getPullRequestLabel(selectedRow)}: ${formatPullRequest(selectedRow)}`,
+			color: getPullRequestColor(selectedRow),
+			dimColor: selectedRow.pullRequest?.kind === 'found' && selectedRow.pullRequest.state !== 'OPEN',
+		},
+	);
+	if (pullRequestTitle) {
+		lines.push({text: `${getPullRequestTitleLabel(selectedRow)}: ${pullRequestTitle}`, dimColor: selectedRow.pullRequest?.kind === 'found' && selectedRow.pullRequest.state !== 'OPEN'});
+	}
+
+	const actionVariant = getActionVariant(selectedRow, activePath);
+	const noteVariant = getNoteVariant(selectedRow);
+	lines.push(
+		divider(),
+		section('Action'),
+		{text: `${getVariantIcon(actionVariant)} ${getActionMessage(selectedRow, activePath)}`, color: getVariantColor(actionVariant)},
+		section('Notes'),
+		{text: `${getVariantIcon(noteVariant)} ${getNotes(selectedRow)}`, color: getVariantColor(noteVariant)},
+	);
+
+	return lines;
+}
+
+function getScrollbarThumbRows(totalLines: number, viewportHeight: number, scrollOffset: number): Set<number> {
+	if (totalLines <= viewportHeight) {
+		return new Set();
+	}
+
+	const thumbSize = Math.max(1, Math.floor((viewportHeight / totalLines) * viewportHeight));
+	const maxScrollOffset = Math.max(1, totalLines - viewportHeight);
+	const thumbStart = Math.round((scrollOffset / maxScrollOffset) * (viewportHeight - thumbSize));
+	return new Set(Array.from({length: thumbSize}, (_, index) => thumbStart + index));
 }
 
 export function ActionPanel({
@@ -139,60 +278,52 @@ export function ActionPanel({
 	activePath,
 	stacked,
 	width,
+	height,
 	compactDetails,
+	scrollOffset = 0,
 }: {
 	selectedRow: AppRow | undefined;
 	activePath: string | null;
 	stacked: boolean;
 	width?: number;
+	height?: number;
 	compactDetails?: boolean;
+	scrollOffset?: number;
 }) {
-	if (!selectedRow) {
-		return (
-			<Box width={width} flexGrow={stacked ? 0 : 1} flexShrink={1} borderStyle="round" borderColor="magenta" flexDirection="column" paddingX={1}>
-				<Text bold color="magenta">
-					Selection / Action
-				</Text>
-				<Text dimColor>No worktrees found.</Text>
-			</Box>
-		);
-	}
+	const lines = getPanelLines(selectedRow, activePath, compactDetails ?? false);
+	const contentViewportHeight = height === undefined ? undefined : Math.max(1, height - 3);
+	const maxScrollOffset = contentViewportHeight === undefined ? 0 : Math.max(0, lines.length - contentViewportHeight);
+	const effectiveScrollOffset = Math.min(Math.max(scrollOffset, 0), maxScrollOffset);
+	const visibleLines = contentViewportHeight === undefined
+		? lines
+		: lines.slice(effectiveScrollOffset, effectiveScrollOffset + contentViewportHeight);
 
-	const actionMessage = getActionMessage(selectedRow, activePath);
-	const showFullPath = !compactDetails && selectedRow.shortPath !== selectedRow.path;
-	const showTags = !compactDetails;
-	const pullRequestTitle = selectedRow.pullRequest?.kind === 'found' && !compactDetails
-		? sanitizeInlineText(selectedRow.pullRequest.title)
-		: null;
+	const showScrollbar = contentViewportHeight !== undefined && lines.length > contentViewportHeight;
+	const scrollbarThumbRows = showScrollbar
+		? getScrollbarThumbRows(lines.length, contentViewportHeight, effectiveScrollOffset)
+		: new Set<number>();
 
 	return (
-		<Box width={width} flexGrow={stacked ? 0 : 1} flexShrink={1} borderStyle="round" borderColor="magenta" flexDirection="column" paddingX={1}>
-			<Text bold color="magenta">
+		<Box width={width} height={height} flexGrow={stacked ? 0 : 1} flexShrink={1} borderStyle="round" borderColor="magenta" flexDirection="column" paddingX={1} overflow="hidden">
+			<Text bold color="magenta" wrap="truncate-end">
 				Selection / Action
 			</Text>
-			<SectionHeader label="Identity" />
-			<Text bold color={selectedRow.tags.includes('active') ? 'green' : undefined} wrap="truncate-end">
-				Branch: {sanitizeInlineText(selectedRow.branch)}
-			</Text>
-			<Text wrap="truncate-end">Path: {sanitizeInlineText(selectedRow.shortPath)}</Text>
-			{showFullPath ? <Text wrap="truncate-end">Full Path: {sanitizeInlineText(selectedRow.path)}</Text> : undefined}
-			<Text wrap="truncate-end">HEAD: {selectedRow.headSha || '-'}</Text>
-			{showTags ? <Text wrap="truncate-end">Tags: {formatTags(selectedRow.tags)}</Text> : undefined}
-			<SectionHeader label="Git / PR" />
-			<Text wrap="truncate-end">Upstream: {formatUpstream(selectedRow)}</Text>
-			<Text wrap="truncate-end">Status: {formatWorkingTree(selectedRow)}</Text>
-			<Text color={getPullRequestColor(selectedRow)} dimColor={selectedRow.pullRequest?.kind === 'found' && selectedRow.pullRequest.state !== 'OPEN'} wrap="truncate-end">
-				{getPullRequestLabel(selectedRow)}: {formatPullRequest(selectedRow)}
-			</Text>
-			{pullRequestTitle ? <Text dimColor={selectedRow.pullRequest?.kind === 'found' && selectedRow.pullRequest.state !== 'OPEN'} wrap="truncate-end">{getPullRequestTitleLabel(selectedRow)}: {pullRequestTitle}</Text> : undefined}
-			<SectionHeader label="Action" />
-			<Text color={getActionColor(selectedRow)} wrap="truncate-end">
-				{actionMessage}
-			</Text>
-			<SectionHeader label="Notes" />
-			<Text dimColor wrap="truncate-end">
-				{getNotes(selectedRow)}
-			</Text>
+			<Box height={contentViewportHeight} flexDirection="column" overflow="hidden">
+				{visibleLines.map((line, index) => (
+					<Box key={`${effectiveScrollOffset + index}-${line.text}`} flexDirection="row">
+						<Box flexGrow={1} flexShrink={1}>
+							<Text color={line.color} dimColor={line.dimColor} bold={line.bold} wrap="truncate-end">
+								{line.text}
+							</Text>
+						</Box>
+						{showScrollbar ? (
+							<Text color={scrollbarThumbRows.has(index) ? 'magenta' : 'gray'} dimColor={!scrollbarThumbRows.has(index)}>
+								{scrollbarThumbRows.has(index) ? '█' : '│'}
+							</Text>
+						) : null}
+					</Box>
+				))}
+			</Box>
 		</Box>
 	);
 }

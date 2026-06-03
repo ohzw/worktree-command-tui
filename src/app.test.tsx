@@ -1,7 +1,7 @@
 import React from 'react';
 import {render} from 'ink-testing-library';
 import {expect, it, vi} from 'vitest';
-import {App, getShellDimensions, shouldStackPanes, shouldUseCompactLayout, shouldUseMinimalLayout} from './app.js';
+import {App, getMouseWheelDelta, getShellDimensions, shouldStackPanes, shouldUseCompactLayout, shouldUseMinimalLayout} from './app.js';
 import type {AppActions, AppModel, RowTag} from './core/runtime.js';
 import {APP_RENDER_OPTIONS} from './render-options.js';
 
@@ -35,8 +35,8 @@ async function waitForInput(): Promise<void> {
 	await promise;
 }
 
-it('uses alternate screen render options', () => {
-	expect(APP_RENDER_OPTIONS).toEqual({alternateScreen: true, exitOnCtrlC: true});
+it('uses alternate screen and incremental rendering options', () => {
+	expect(APP_RENDER_OPTIONS).toEqual({alternateScreen: true, exitOnCtrlC: true, incrementalRendering: true});
 });
 
 it('never grows the shell beyond the available terminal viewport', () => {
@@ -45,17 +45,40 @@ it('never grows the shell beyond the available terminal viewport', () => {
 	expect(getShellDimensions(100, 30)).toEqual({rootWidth: 100, rootHeight: 30, bodyWidth: 96, listWidth: 32, actionWidth: 63});
 });
 
-it('switches to compact, stacked, and minimal layouts at the expected breakpoints', () => {
+it('parses SGR mouse wheel events', () => {
+	expect(getMouseWheelDelta('\u001B[<64;10;5M')).toBe(-1);
+	expect(getMouseWheelDelta('\u001B[<65;10;5M')).toBe(1);
+	expect(getMouseWheelDelta('\u001B[<65;10;5M\u001B[<65;10;5M')).toBe(2);
+	expect(getMouseWheelDelta('x')).toBe(0);
+});
+
+it('renders one fullscreen frame for each responsive layout', () => {
+	const model = createModel();
+	for (const windowSizeOverride of [
+		{columns: 8, rows: 4},
+		{columns: 30, rows: 8},
+		{columns: 90, rows: 30},
+		{columns: 90, rows: 40},
+		{columns: 120, rows: 30},
+	]) {
+		const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={windowSizeOverride} />);
+		expect((lastFrame() ?? '').split('\n')).toHaveLength(windowSizeOverride.rows);
+	}
+});
+
+it('switches to stacked and minimal layouts at the expected breakpoints', () => {
 	expect(shouldUseMinimalLayout(8, 4)).toBe(true);
-	expect(shouldUseMinimalLayout(30, 8)).toBe(false);
-	expect(shouldUseCompactLayout(30, 8, 1)).toBe(true);
-	expect(shouldUseCompactLayout(50, 16, 10)).toBe(true);
-	expect(shouldUseCompactLayout(72, 20, 10)).toBe(true);
-	expect(shouldUseCompactLayout(90, 22, 3)).toBe(true);
+	expect(shouldUseMinimalLayout(30, 8)).toBe(true);
+	expect(shouldUseMinimalLayout(30, 12)).toBe(false);
+	expect(shouldUseCompactLayout(30, 8, 1)).toBe(false);
+	expect(shouldUseCompactLayout(50, 16, 10)).toBe(false);
+	expect(shouldUseCompactLayout(72, 20, 10)).toBe(false);
+	expect(shouldUseCompactLayout(90, 22, 3)).toBe(false);
+	expect(shouldUseCompactLayout(30, 30, 1)).toBe(false);
 	expect(shouldUseCompactLayout(120, 30, 3)).toBe(false);
-	expect(shouldStackPanes(90, 24, 3)).toBe(false);
-	expect(shouldStackPanes(90, 30, 3)).toBe(true);
-	expect(shouldStackPanes(120, 30, 3)).toBe(false);
+	expect(shouldStackPanes(90, 30, 3)).toBe(false);
+	expect(shouldStackPanes(90, 40, 3)).toBe(true);
+	expect(shouldStackPanes(120, 40, 3)).toBe(false);
 });
 
 it('renders colored pane labels and active marker in the main layout', () => {
@@ -68,9 +91,19 @@ it('renders colored pane labels and active marker in the main layout', () => {
 	expect(lastFrame()).toContain('Namespace: rojo-serve');
 	expect(lastFrame()).toContain('Worktrees');
 	expect(lastFrame()).toContain('Selection / Action');
-	expect(lastFrame()).toContain('Status: idle — ready');
-	expect(lastFrame()).toContain('Keys: ↑↓/jk move  g/G first/last  Enter start/switch  s stop  r refresh  q quit');
+	expect(lastFrame()).toContain('idle');
+	expect(lastFrame()).toContain('Wheel/PgUp/PgDn list & selection scroll');
 	expect(lastFrame()).toContain('* feat/a');
+});
+
+it('keeps the pane layout on narrow terminals when vertical space is available', () => {
+	const model = createModel();
+	const {lastFrame} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 70, rows: 30}} />,
+	);
+	expect(lastFrame()).toContain('Worktrees');
+	expect(lastFrame()).toContain('Selection');
+	expect(lastFrame()).not.toContain('Resize terminal for split view');
 });
 
 it('keeps the selection pane width stable across selected worktrees', () => {
@@ -102,10 +135,10 @@ it('keeps the selection pane width stable across selected worktrees', () => {
 	expect(shortTitleLine.indexOf('Selection / Action')).toBe(longTitleLine.indexOf('Selection / Action'));
 });
 
-it('stacks panes responsively on medium-width terminals', () => {
+it('stacks panes responsively on medium-width terminals when there is enough vertical space', () => {
 	const model = createModel();
 	const {lastFrame} = render(
-		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 90, rows: 30}} />,
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 90, rows: 40}} />,
 	);
 	expect(lastFrame()).toContain('Worktrees');
 	expect(lastFrame()).toContain('Selection / Action');
@@ -124,8 +157,6 @@ it('uses split layout when the stacked breakpoint no longer applies', () => {
 		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 90, rows: 26}} />,
 	);
 	expect(lastFrame()).toContain('[Action]');
-	expect(lastFrame()).toContain('[Notes]');
-	expect(lastFrame()).toContain('Status: idle — ready');
 	expect(lastFrame()).not.toContain('Full Path:');
 	expect(lastFrame()).not.toContain('Tags:');
 	expect(lastFrame()).not.toContain('PR Title:');
@@ -149,18 +180,122 @@ it('keeps rich detail rows on medium split terminals', () => {
 		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 30}} />,
 	);
 	expect(lastFrame()).toContain('Full Path: /repo/.worktree/feat-a');
-	expect(lastFrame()).toContain('Tags: active');
+	expect(lastFrame()).not.toContain('ACTIVE');
 	expect(lastFrame()).toContain('PR Title: Selection pane metadata');
-	expect(lastFrame()).toContain('Status: idle — ready');
+
 });
 
-it('renders a compact fallback shell on short terminals', () => {
+it('scrolls selection details when the pane is height constrained', async () => {
+	const model = createModel({
+		rows: [{
+			path: '/repo/.worktree/feat-a',
+			shortPath: '.worktree/feat-a',
+			branch: 'feat/a',
+			tags: ['active'],
+			headSha: '46af3f1c',
+			upstream: {branch: 'origin/develop', ahead: 4, behind: 24},
+			workingTree: {staged: 1, unstaged: 2, untracked: 3, conflicts: 0},
+			pullRequest: {kind: 'found', number: 2125, title: 'Selection pane metadata', url: 'https://github.com/finn-inc/reclaim-the-forest/pull/2125', state: 'OPEN', isDraft: true, baseBranch: 'develop'},
+		}] as AppModel['rows'],
+		activePath: '/repo/.worktree/feat-a',
+		activeBranch: 'feat/a',
+	});
+	const {lastFrame, stdin} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 16}} />,
+	);
+	expect(lastFrame()).toContain('[Identity]');
+	expect(lastFrame()).toContain('█');
+	expect(lastFrame()).not.toContain('Full Path: /repo/.worktree/feat-a');
+	stdin.write('\u001B[6~');
+	await waitForInput();
+	await waitForInput();
+	expect(lastFrame()).toContain('Full Path: /repo/.worktree/feat-a');
+});
+
+it('scrolls selection details with SGR mouse wheel input', async () => {
+	const model = createModel({
+		rows: [{
+			path: '/repo/.worktree/feat-a',
+			shortPath: '.worktree/feat-a',
+			branch: 'feat/a',
+			tags: ['active'],
+			headSha: '46af3f1c',
+			upstream: {branch: 'origin/develop', ahead: 4, behind: 24},
+			workingTree: {staged: 1, unstaged: 2, untracked: 3, conflicts: 0},
+			pullRequest: {kind: 'found', number: 2125, title: 'Selection pane metadata', url: 'https://github.com/finn-inc/reclaim-the-forest/pull/2125', state: 'OPEN', isDraft: true, baseBranch: 'develop'},
+		}] as AppModel['rows'],
+		activePath: '/repo/.worktree/feat-a',
+		activeBranch: 'feat/a',
+	});
+	const {lastFrame, stdin} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 16}} />,
+	);
+	expect(lastFrame()).not.toContain('Full Path: /repo/.worktree/feat-a');
+	stdin.write('\u001B[<65;80;10M');
+	await waitForInput();
+	await waitForInput();
+	expect(lastFrame()).toContain('Full Path: /repo/.worktree/feat-a');
+});
+
+it('scrolls worktree list with SGR mouse wheel input', async () => {
+	const model = createModel({
+		rows: Array.from({length: 12}, (_, index) => ({
+			path: `/repo/.worktree/feat-${index}`,
+			shortPath: `.worktree/feat-${index}`,
+			branch: `feat-${index}`,
+			tags: index === 0 ? ['active'] : [],
+		})),
+		activePath: '/repo/.worktree/feat-0',
+		activeBranch: 'feat-0',
+	});
+	const {lastFrame, stdin} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 16}} />,
+	);
+	expect(lastFrame()).not.toContain('feat-8');
+	expect(lastFrame()).toContain('│ > * feat-0');
+	stdin.write('\u001B[<65;10;5M');
+	await waitForInput();
+	await waitForInput();
+	expect(lastFrame()).toContain('│   - feat-3');
+	expect(lastFrame()).not.toContain('│ > - feat-0');
+});
+
+it('renders a minimal fallback shell on very short terminals', () => {
 	const model = createModel({rows: [{path: '/repo', shortPath: '.', branch: 'develop', tags: ['main']}], activePath: '/repo', activeBranch: 'develop'});
 	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 30, rows: 8}} />);
-	expect(lastFrame()).toContain('Active: develop');
-	expect(lastFrame()).toContain('Selected: develop');
-	expect(lastFrame()).toContain('Status: idle — ready');
-	expect(lastFrame()).toContain('Keys: ↑↓/jk g/G ↵ s r q');
+	expect(lastFrame()).toContain('A:develop');
+	expect(lastFrame()).toContain('S:develop');
+	expect(lastFrame()).toContain('T:idle');
+	expect(lastFrame()).toContain('↑↓jk↵q');
+});
+
+it('shows completion alert after starting a worktree', async () => {
+	const model = createModel({
+		rows: [{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: []}],
+		activePath: null,
+		activeBranch: null,
+	});
+	const completed = {
+		...model,
+		activePath: '/repo/.worktree/feat-a',
+		activeBranch: 'feat/a',
+		status: {kind: 'running', message: 'started feat/a'},
+	} as const;
+	const {lastFrame, stdin} = render(
+		<App
+			initialModel={model}
+			actions={{
+				...makeFakeActions(model),
+				start: vi.fn(async () => completed),
+			}}
+			windowSizeOverride={{columns: 80, rows: 22}}
+		/>,
+	);
+	stdin.write('\r');
+	await waitForInput();
+	await waitForInput();
+	await waitForInput();
+	expect(lastFrame()).toContain('Switched to feat/a');
 });
 
 it('renders a minimal fallback shell on extremely small terminals', () => {
@@ -408,7 +543,7 @@ it('converts start failures into error status instead of crashing the app', asyn
 	stdin.write('\r');
 	await waitForInput();
 	await waitForInput();
-	expect(lastFrame()).toContain('Status: error — spawn failed: /tmp/logs/rojo-with-a-very-long-file-name-that-keeps-going-until-it-wraps-across-…');
+	expect(lastFrame()).toContain('spawn failed: /tmp/logs/rojo-with-a-very-long-file-name-that-keeps-going-until-it-wraps-acro');
 });
 
 it('treats selecting the already-active worktree as a no-op refresh', async () => {

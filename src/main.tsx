@@ -2,10 +2,12 @@
 import React from 'react';
 import {createConfigForRepo, parseInitArgs} from './core/init.js';
 import {CONFIG_FILE_NAME, CONFIG_FILE_NAMES} from './core/config.js';
+import {ThemeProvider} from '@inkjs/ui';
 import {render} from 'ink';
+import {APP_RENDER_OPTIONS} from './render-options.js';
 import {App} from './app.js';
 import {buildActions, buildInitialModel} from './core/runtime.js';
-import {APP_RENDER_OPTIONS} from './render-options.js';
+import {appTheme} from './ui-theme.js';
 
 const cwd = process.cwd();
 const args = process.argv.slice(2);
@@ -74,7 +76,32 @@ if (subcommand !== undefined) {
 
 try {
 	const [initialModel, actions] = await Promise.all([buildInitialModel(cwd), buildActions(cwd)]);
-	render(<App initialModel={initialModel} actions={actions} />, APP_RENDER_OPTIONS);
+	const createApp = () => (
+		<ThemeProvider theme={appTheme}>
+			<App initialModel={initialModel} actions={actions} />
+		</ThemeProvider>
+	);
+	const instance = render(createApp(), APP_RENDER_OPTIONS);
+	let repaintTimer: ReturnType<typeof setTimeout> | undefined;
+	const repaintAfterResize = () => {
+		// Give Ink/useWindowSize one tick to observe the new size, then force a fresh root render.
+		if (repaintTimer) {
+			clearTimeout(repaintTimer);
+		}
+		repaintTimer = setTimeout(() => {
+			instance.rerender(createApp());
+		}, 25);
+	};
+
+	if (process.stdout.isTTY) {
+		process.stdout.on('resize', repaintAfterResize);
+		void instance.waitUntilExit().finally(() => {
+			if (repaintTimer) {
+				clearTimeout(repaintTimer);
+			}
+			process.stdout.off('resize', repaintAfterResize);
+		});
+	}
 } catch (error) {
 	console.error(describeError(error));
 	process.exit(1);

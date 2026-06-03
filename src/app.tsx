@@ -9,7 +9,9 @@ import type {AppActions, AppModel} from './core/runtime.js';
 export interface ShellDimensions {
 	rootWidth: number;
 	rootHeight: number;
+	bodyWidth: number;
 	listWidth: number;
+	actionWidth: number;
 }
 
 export interface AppWindowSize {
@@ -30,19 +32,26 @@ function getNextSelectedPath(rows: AppModel['rows'], currentPath: string | null)
 export function getShellDimensions(columns: number, rows: number): ShellDimensions {
 	const rootWidth = Math.max(columns, 1);
 	const rootHeight = Math.max(rows, 1);
-	const maxListWidth = Math.max(1, rootWidth - 12);
-	const desiredListWidth = Math.max(1, Math.floor((rootWidth - 6) * 0.34));
+	const bodyWidth = Math.max(rootWidth - 4, 1);
+	const maxListWidth = Math.max(1, bodyWidth - 21);
+	const desiredListWidth = Math.max(1, Math.floor((bodyWidth - 1) * 0.34));
 	const listWidth = Math.min(42, desiredListWidth, maxListWidth);
-	return {rootWidth, rootHeight, listWidth};
+	const actionWidth = Math.max(1, bodyWidth - listWidth - 1);
+	return {rootWidth, rootHeight, bodyWidth, listWidth, actionWidth};
 }
 
 export function shouldUseCompactLayout(columns: number, rows: number, worktreeCount = 0): boolean {
-	const contentAwareRowFloor = Math.max(20, worktreeCount + 10);
-	return columns < 72 || rows <= contentAwareRowFloor;
+	const contentAwareRowFloor = Math.max(20, worktreeCount + 12);
+	return columns < 72 || rows <= contentAwareRowFloor || (columns < 96 && rows < 24);
 }
 
 export function shouldUseMinimalLayout(columns: number, rows: number): boolean {
 	return columns < 20 || rows < 6;
+}
+
+export function shouldStackPanes(columns: number, rows: number, worktreeCount = 0): boolean {
+	const minimumRows = Math.max(26, worktreeCount + 18);
+	return columns < 96 && rows >= minimumRows;
 }
 
 export function App({
@@ -73,9 +82,17 @@ export function App({
 		return foundIndex >= 0 ? foundIndex : 0;
 	}, [model.rows, selectedPath]);
 	const selected = model.rows[selectedIndex];
-	const {rootWidth, rootHeight, listWidth} = getShellDimensions(columns, rows);
+	const {rootWidth, rootHeight, bodyWidth, listWidth, actionWidth} = getShellDimensions(columns, rows);
 	const minimalLayout = shouldUseMinimalLayout(rootWidth, rootHeight);
 	const compactLayout = !minimalLayout && shouldUseCompactLayout(rootWidth, rootHeight, model.rows.length);
+	const stackedLayout = !minimalLayout && !compactLayout && shouldStackPanes(rootWidth, rootHeight, model.rows.length);
+
+	function moveSelection(nextIndex: number): void {
+		if (model.rows.length === 0) {
+			return;
+		}
+		setSelectedPath(model.rows[Math.min(Math.max(nextIndex, 0), model.rows.length - 1)]!.path);
+	}
 
 	async function apply(action: () => Promise<AppModel>) {
 		inFlightRef.current = true;
@@ -100,20 +117,20 @@ export function App({
 			exit();
 			return;
 		}
-		if (key.upArrow) {
-			if (model.rows.length === 0) {
-				return;
-			}
-			const nextIndex = Math.max(0, selectedIndex - 1);
-			setSelectedPath(model.rows[nextIndex]!.path);
+		if (key.upArrow || input === 'k') {
+			moveSelection(selectedIndex - 1);
 			return;
 		}
-		if (key.downArrow) {
-			if (model.rows.length === 0) {
-				return;
-			}
-			const nextIndex = Math.min(model.rows.length - 1, selectedIndex + 1);
-			setSelectedPath(model.rows[nextIndex]!.path);
+		if (key.downArrow || input === 'j') {
+			moveSelection(selectedIndex + 1);
+			return;
+		}
+		if (input === 'g') {
+			moveSelection(0);
+			return;
+		}
+		if (input === 'G') {
+			moveSelection(model.rows.length - 1);
 			return;
 		}
 		if (inFlightRef.current) {
@@ -144,36 +161,38 @@ export function App({
 
 	if (minimalLayout) {
 		return (
-			<Box width={rootWidth} height={rootHeight} flexDirection="column">
-				<Text bold wrap="truncate-end">A:{model.activeBranch ?? '-'}</Text>
+			<Box width={rootWidth} flexDirection="column">
+				<Text bold color="green" wrap="truncate-end">
+					A:{model.activeBranch ?? '-'}
+				</Text>
 				{rootHeight >= 2 ? <Text wrap="truncate-end">S:{selected?.branch ?? '-'}</Text> : null}
 				{rootHeight >= 3 ? <Text wrap="truncate-end">T:{model.status.kind}</Text> : null}
-				{rootHeight >= 4 ? <Text dimColor wrap="truncate-end">↑↓↵srq</Text> : null}
+				{rootHeight >= 4 ? <Text dimColor wrap="truncate-end">↑↓jk↵q</Text> : null}
 			</Box>
 		);
 	}
 
 	if (compactLayout) {
 		return (
-			<Box width={rootWidth} height={rootHeight} borderStyle="round" flexDirection="column" paddingX={1}>
-				<Text bold wrap="truncate-end">
+			<Box width={rootWidth} borderStyle="round" borderColor="yellow" flexDirection="column" paddingX={1}>
+				<Text bold color="green" wrap="truncate-end">
 					Active: {model.activeBranch ?? '-'}
 				</Text>
 				<Text wrap="truncate-end">Selected: {selected?.branch ?? '-'}</Text>
 				<Text wrap="truncate-end">Status: {model.status.kind} — {model.status.message}</Text>
 				<Text dimColor wrap="truncate-end">
-					Keys: ↑↓ Enter s r q · Resize terminal for split view
+					Keys: ↑↓/jk g/G ↵ s r q · Resize terminal for split view
 				</Text>
 			</Box>
 		);
 	}
 
 	return (
-		<Box width={rootWidth} height={rootHeight} borderStyle="round" flexDirection="column" paddingX={1}>
+		<Box width={rootWidth} height={stackedLayout ? undefined : rootHeight} borderStyle="round" borderColor="gray" flexDirection="column" paddingX={1}>
 			<Header repoName={model.repoName} namespace={model.namespace} activeBranch={model.activeBranch} />
-			<Box flexGrow={1} flexShrink={1}>
-				<WorktreeList rows={model.rows} selectedIndex={selectedIndex} width={listWidth} />
-				<ActionPanel selectedRow={selected} activePath={model.activePath} />
+			<Box flexDirection={stackedLayout ? 'column' : 'row'} flexGrow={stackedLayout ? 0 : 1} flexShrink={1}>
+				<WorktreeList rows={model.rows} selectedIndex={selectedIndex} width={stackedLayout ? bodyWidth : listWidth} stacked={stackedLayout} />
+				<ActionPanel selectedRow={selected} activePath={model.activePath} stacked={stackedLayout} width={stackedLayout ? bodyWidth : actionWidth} />
 			</Box>
 			<ContextBar status={model.status} />
 		</Box>

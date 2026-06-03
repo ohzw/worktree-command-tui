@@ -29,20 +29,34 @@ function getNotes(selectedRow: AppRow): string {
 	return 'Ready to launch with the configured command in this worktree.';
 }
 
-export function ActionPanel({selectedRow, activePath}: {selectedRow: AppRow | undefined; activePath: string | null}) {
+export function ActionPanel({
+	selectedRow,
+	activePath,
+	stacked,
+	width,
+}: {
+	selectedRow: AppRow | undefined;
+	activePath: string | null;
+	stacked: boolean;
+	width?: number;
+}) {
 	if (!selectedRow) {
 		return (
-			<Box flexGrow={1} borderStyle="round" flexDirection="column" paddingX={1}>
-				<Text bold>Selection / Action</Text>
+			<Box width={width} flexGrow={stacked ? 0 : 1} flexShrink={1} borderStyle="round" borderColor="magenta" flexDirection="column" paddingX={1}>
+				<Text bold color="magenta">
+					Selection / Action
+				</Text>
 				<Text dimColor>No worktrees found.</Text>
 			</Box>
 		);
 	}
 
 	return (
-		<Box flexGrow={1} borderStyle="round" flexDirection="column" paddingX={1}>
-			<Text bold>Selection / Action</Text>
-			<Text bold wrap="truncate-end">
+		<Box width={width} flexGrow={stacked ? 0 : 1} flexShrink={1} borderStyle="round" borderColor="magenta" flexDirection="column" paddingX={1}>
+			<Text bold color="magenta">
+				Selection / Action
+			</Text>
+			<Text bold color={selectedRow.tags.includes('active') ? 'green' : undefined} wrap="truncate-end">
 				Branch: {selectedRow.branch}
 			</Text>
 			<Text wrap="truncate-end">Path: {selectedRow.path}</Text>

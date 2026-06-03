@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {getActionColor, getPullRequestColor} from './ActionPanel.js';
+import {getActionVariant, getPullRequestColor} from './ActionPanel.js';
 import type {AppRow} from '../core/runtime.js';
 
 function makeRow(overrides: Partial<AppRow> = {}): AppRow {
@@ -22,14 +22,14 @@ describe('getPullRequestColor', () => {
 	});
 });
 
-describe('getActionColor', () => {
-	it('reserves warning colors for invalid, conflicted, and dirty worktrees', () => {
-		expect(getActionColor(makeRow({invalidReason: 'Missing required files'}))).toBe('red');
-		expect(getActionColor(makeRow({workingTree: {staged: 0, unstaged: 0, untracked: 0, conflicts: 1}}))).toBe('red');
-		expect(getActionColor(makeRow({workingTree: {staged: 1, unstaged: 0, untracked: 0, conflicts: 0}}))).toBe('yellow');
-		expect(getActionColor(makeRow({workingTree: {staged: 0, unstaged: 1, untracked: 0, conflicts: 0}}))).toBe('yellow');
-		expect(getActionColor(makeRow({workingTree: {staged: 0, unstaged: 0, untracked: 1, conflicts: 0}}))).toBe('yellow');
-		expect(getActionColor(makeRow({tags: ['active']}))).toBeUndefined();
-		expect(getActionColor(makeRow())).toBeUndefined();
+describe('getActionVariant', () => {
+	it('uses success, info, and error variants for different action states', () => {
+		expect(getActionVariant(makeRow({invalidReason: 'Missing required files'}), null)).toBe('error');
+		expect(getActionVariant(makeRow({workingTree: {staged: 0, unstaged: 0, untracked: 0, conflicts: 1}}), null)).toBe('error');
+		expect(getActionVariant(makeRow({workingTree: {staged: 1, unstaged: 0, untracked: 0, conflicts: 0}}), null)).toBe('info');
+		expect(getActionVariant(makeRow({workingTree: {staged: 0, unstaged: 1, untracked: 0, conflicts: 0}}), null)).toBe('info');
+		expect(getActionVariant(makeRow({workingTree: {staged: 0, unstaged: 0, untracked: 1, conflicts: 0}}), null)).toBe('info');
+		expect(getActionVariant(makeRow({tags: ['active']}), '/repo/.worktree/feat-a')).toBe('success');
+		expect(getActionVariant(makeRow(), null)).toBe('info');
 	});
 });

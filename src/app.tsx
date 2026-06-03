@@ -1,10 +1,11 @@
+import {Alert, Spinner} from '@inkjs/ui';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {Box, Text, useApp, useInput, useWindowSize} from 'ink';
 import {ActionPanel} from './components/ActionPanel.js';
 import {ContextBar} from './components/ContextBar.js';
 import {Header} from './components/Header.js';
 import {WorktreeList} from './components/WorktreeList.js';
-import type {AppActions, AppModel} from './core/runtime.js';
+import type {AppActions, AppModel, AppStatus} from './core/runtime.js';
 
 export interface ShellDimensions {
 	rootWidth: number;
@@ -68,11 +69,36 @@ export function App({
 	const {columns, rows} = windowSizeOverride ?? liveWindowSize;
 	const [model, setModel] = useState(initialModel);
 	const [selectedPath, setSelectedPath] = useState<string | null>(initialModel.rows[0]?.path ?? null);
+	const [completedAlert, setCompletedAlert] = useState<string | null>(null);
 	const inFlightRef = useRef(false);
+	const previousStatusRef = useRef<AppStatus['kind']>(initialModel.status.kind);
+	const alertTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	useEffect(() => {
 		setSelectedPath(currentPath => getNextSelectedPath(model.rows, currentPath));
 	}, [model.rows]);
+
+	useEffect(() => {
+		const becameRunning = previousStatusRef.current === 'starting' && model.status.kind === 'running';
+		if (becameRunning) {
+			setCompletedAlert(model.activeBranch ? `Switched to ${model.activeBranch}` : 'Worktree switch complete.');
+			if (alertTimeoutRef.current !== null) {
+				clearTimeout(alertTimeoutRef.current);
+			}
+			alertTimeoutRef.current = setTimeout(() => {
+				setCompletedAlert(null);
+			}, 2500);
+		}
+		previousStatusRef.current = model.status.kind;
+	}, [model.status.kind, model.activeBranch]);
+
+	useEffect(() => {
+		return () => {
+			if (alertTimeoutRef.current !== null) {
+				clearTimeout(alertTimeoutRef.current);
+			}
+		};
+	}, []);
 
 	const selectedIndex = useMemo(() => {
 		if (selectedPath === null) {
@@ -86,13 +112,21 @@ export function App({
 	const minimalLayout = shouldUseMinimalLayout(rootWidth, rootHeight);
 	const compactLayout = !minimalLayout && shouldUseCompactLayout(rootWidth, rootHeight, model.rows.length);
 	const stackedLayout = !minimalLayout && !compactLayout && shouldStackPanes(rootWidth, rootHeight, model.rows.length);
-	const compactDetailPane = !stackedLayout && rootHeight <= 26;
+	const compactDetailPane = !stackedLayout && rootHeight <= 30 && model.rows.length > 1;
 
 	function moveSelection(nextIndex: number): void {
 		if (model.rows.length === 0) {
 			return;
 		}
 		setSelectedPath(model.rows[Math.min(Math.max(nextIndex, 0), model.rows.length - 1)]!.path);
+	}
+
+	function clearTransientAlert(): void {
+		if (alertTimeoutRef.current !== null) {
+			clearTimeout(alertTimeoutRef.current);
+			alertTimeoutRef.current = null;
+		}
+		setCompletedAlert(null);
 	}
 
 	async function apply(action: () => Promise<AppModel>) {
@@ -140,22 +174,27 @@ export function App({
 		if (key.return && selected) {
 			if (selected.invalidReason) {
 				setModel(current => ({...current, status: {kind: 'error', message: selected.invalidReason!}}));
+				clearTransientAlert();
 				return;
 			}
 			if (selected.path === model.activePath) {
 				setModel(current => ({...current, status: {kind: 'idle', message: 'already active'}}));
+				clearTransientAlert();
 				return;
 			}
 			setModel(current => ({...current, status: {kind: 'starting', message: `Starting ${selected.branch}...`}}));
+			clearTransientAlert();
 			void apply(() => actions.start(selected.path));
 			return;
 		}
 		if (input === 's') {
 			setModel(current => ({...current, status: {kind: 'stopping', message: 'Stopping active session...'}}));
+			clearTransientAlert();
 			void apply(() => actions.stop());
 			return;
 		}
 		if (input === 'r') {
+			clearTransientAlert();
 			void apply(() => actions.refresh());
 		}
 	});
@@ -180,7 +219,13 @@ export function App({
 					Active: {model.activeBranch ?? '-'}
 				</Text>
 				<Text wrap="truncate-end">Selected: {selected?.branch ?? '-'}</Text>
-				<Text wrap="truncate-end">Status: {model.status.kind} — {model.status.message}</Text>
+				{completedAlert
+					? <Text color="green" wrap="truncate-end">✔ {completedAlert}</Text>
+					: model.status.kind === 'starting' || model.status.kind === 'stopping' ? (
+						<Spinner label={`Status: ${model.status.kind} — ${model.status.message}`} />
+					) : (
+						<Text wrap="truncate-end">Status: {model.status.kind} — {model.status.message}</Text>
+					)}
 				<Text dimColor wrap="truncate-end">
 					Keys: ↑↓/jk g/G ↵ s r q · Resize terminal for split view
 				</Text>
@@ -196,6 +241,11 @@ export function App({
 				<ActionPanel selectedRow={selected} activePath={model.activePath} stacked={stackedLayout} width={stackedLayout ? bodyWidth : actionWidth} compactDetails={compactDetailPane} />
 			</Box>
 			<ContextBar status={model.status} />
+			{completedAlert ? (
+				<Box position="absolute" top={1} right={2}>
+					<Alert variant="success">{completedAlert}</Alert>
+				</Box>
+			) : null}
 		</Box>
 	);
 }

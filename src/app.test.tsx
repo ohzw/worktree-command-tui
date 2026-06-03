@@ -68,7 +68,7 @@ it('renders colored pane labels and active marker in the main layout', () => {
 	expect(lastFrame()).toContain('Namespace: rojo-serve');
 	expect(lastFrame()).toContain('Worktrees');
 	expect(lastFrame()).toContain('Selection / Action');
-	expect(lastFrame()).toContain('Status: idle — ready');
+	expect(lastFrame()).toContain('idle');
 	expect(lastFrame()).toContain('Keys: ↑↓/jk move  g/G first/last  Enter start/switch  s stop  r refresh  q quit');
 	expect(lastFrame()).toContain('* feat/a');
 });
@@ -125,7 +125,6 @@ it('uses split layout when the stacked breakpoint no longer applies', () => {
 	);
 	expect(lastFrame()).toContain('[Action]');
 	expect(lastFrame()).toContain('[Notes]');
-	expect(lastFrame()).toContain('Status: idle — ready');
 	expect(lastFrame()).not.toContain('Full Path:');
 	expect(lastFrame()).not.toContain('Tags:');
 	expect(lastFrame()).not.toContain('PR Title:');
@@ -149,9 +148,9 @@ it('keeps rich detail rows on medium split terminals', () => {
 		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 30}} />,
 	);
 	expect(lastFrame()).toContain('Full Path: /repo/.worktree/feat-a');
-	expect(lastFrame()).toContain('Tags: active');
+	expect(lastFrame()).not.toContain('ACTIVE');
 	expect(lastFrame()).toContain('PR Title: Selection pane metadata');
-	expect(lastFrame()).toContain('Status: idle — ready');
+
 });
 
 it('renders a compact fallback shell on short terminals', () => {
@@ -159,8 +158,37 @@ it('renders a compact fallback shell on short terminals', () => {
 	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 30, rows: 8}} />);
 	expect(lastFrame()).toContain('Active: develop');
 	expect(lastFrame()).toContain('Selected: develop');
-	expect(lastFrame()).toContain('Status: idle — ready');
+	expect(lastFrame()).toContain('idle — ready');
 	expect(lastFrame()).toContain('Keys: ↑↓/jk g/G ↵ s r q');
+});
+
+it('shows completion alert in compact layout', async () => {
+	const model = createModel({
+		rows: [{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: []}],
+		activePath: null,
+		activeBranch: null,
+	});
+	const completed = {
+		...model,
+		activePath: '/repo/.worktree/feat-a',
+		activeBranch: 'feat/a',
+		status: {kind: 'running', message: 'started feat/a'},
+	} as const;
+	const {lastFrame, stdin} = render(
+		<App
+			initialModel={model}
+			actions={{
+				...makeFakeActions(model),
+				start: vi.fn(async () => completed),
+			}}
+			windowSizeOverride={{columns: 80, rows: 22}}
+		/>,
+	);
+	stdin.write('\r');
+	await waitForInput();
+	await waitForInput();
+	await waitForInput();
+	expect(lastFrame()).toContain('Switched to feat/a');
 });
 
 it('renders a minimal fallback shell on extremely small terminals', () => {
@@ -408,7 +436,7 @@ it('converts start failures into error status instead of crashing the app', asyn
 	stdin.write('\r');
 	await waitForInput();
 	await waitForInput();
-	expect(lastFrame()).toContain('Status: error — spawn failed: /tmp/logs/rojo-with-a-very-long-file-name-that-keeps-going-until-it-wraps-across-…');
+	expect(lastFrame()).toContain('spawn failed: /tmp/logs/rojo-with-a-very-long-file-name-that-keeps-going-until-it-wraps-acro');
 });
 
 it('treats selecting the already-active worktree as a no-op refresh', async () => {

@@ -2,10 +2,12 @@
 import React from 'react';
 import {createConfigForRepo, parseInitArgs} from './core/init.js';
 import {CONFIG_FILE_NAME, CONFIG_FILE_NAMES} from './core/config.js';
+import {ThemeProvider} from '@inkjs/ui';
 import {render} from 'ink';
+import {APP_RENDER_OPTIONS} from './render-options.js';
 import {App} from './app.js';
 import {buildActions, buildInitialModel} from './core/runtime.js';
-import {APP_RENDER_OPTIONS} from './render-options.js';
+import {appTheme} from './ui-theme.js';
 
 const cwd = process.cwd();
 const args = process.argv.slice(2);
@@ -74,7 +76,12 @@ if (subcommand !== undefined) {
 
 try {
 	const [initialModel, actions] = await Promise.all([buildInitialModel(cwd), buildActions(cwd)]);
-	render(<App initialModel={initialModel} actions={actions} />, APP_RENDER_OPTIONS);
+	render(
+		<ThemeProvider theme={appTheme}>
+			<App initialModel={initialModel} actions={actions} />
+		</ThemeProvider>,
+		APP_RENDER_OPTIONS,
+	);
 } catch (error) {
 	console.error(describeError(error));
 	process.exit(1);

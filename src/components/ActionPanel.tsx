@@ -1,8 +1,58 @@
 import {Box, Text} from 'ink';
+import {Badge, StatusMessage} from '@inkjs/ui';
 import type {AppRow} from '../core/runtime.js';
 
-function formatTags(tags: AppRow['tags']): string {
-	return tags.length === 0 ? '-' : tags.join(' · ');
+function getTagColor(tag: string): 'green' | 'yellow' | 'blue' | 'red' | 'magenta' {
+	if (tag === 'active') {
+		return 'green';
+	}
+	if (tag === 'external') {
+		return 'yellow';
+	}
+	if (tag === 'main') {
+		return 'blue';
+	}
+	if (tag === 'invalid') {
+		return 'red';
+	}
+	return 'magenta';
+}
+
+export function getActionVariant(selectedRow: AppRow, activePath: string | null): 'success' | 'error' | 'info' {
+	if (selectedRow.invalidReason) {
+		return 'error';
+	}
+	if (selectedRow.path === activePath) {
+		return 'success';
+	}
+	if ((selectedRow.workingTree?.conflicts ?? 0) > 0) {
+		return 'error';
+	}
+	if (
+		(selectedRow.workingTree?.staged ?? 0) > 0
+		|| (selectedRow.workingTree?.unstaged ?? 0) > 0
+		|| (selectedRow.workingTree?.untracked ?? 0) > 0
+	) {
+		return 'info';
+	}
+	return 'info';
+}
+
+function getNoteVariant(selectedRow: AppRow): 'success' | 'error' | 'info' {
+	if (selectedRow.invalidReason || selectedRow.tags.includes('external')) {
+		return selectedRow.invalidReason ? 'error' : 'info';
+	}
+	if ((selectedRow.workingTree?.conflicts ?? 0) > 0) {
+		return 'error';
+	}
+	if (
+		(selectedRow.workingTree?.staged ?? 0) > 0
+		|| (selectedRow.workingTree?.unstaged ?? 0) > 0
+		|| (selectedRow.workingTree?.untracked ?? 0) > 0
+	) {
+		return 'info';
+	}
+	return 'info';
 }
 
 function sanitizeInlineText(value: string): string {
@@ -96,32 +146,12 @@ function getActionMessage(selectedRow: AppRow, activePath: string | null): strin
 	return 'Press Enter to start here and switch the active session.';
 }
 
-export function getActionColor(selectedRow: AppRow): 'yellow' | 'red' | undefined {
-	if (selectedRow.invalidReason) {
-		return 'red';
-	}
-	if ((selectedRow.workingTree?.conflicts ?? 0) > 0) {
-		return 'red';
-	}
-	if (
-		(selectedRow.workingTree?.staged ?? 0) > 0
-		|| (selectedRow.workingTree?.unstaged ?? 0) > 0
-		|| (selectedRow.workingTree?.untracked ?? 0) > 0
-	) {
-		return 'yellow';
-	}
-	return undefined;
-}
-
 function getNotes(selectedRow: AppRow): string {
 	if (selectedRow.invalidReason) {
 		return selectedRow.invalidReason;
 	}
 	if (selectedRow.tags.includes('external')) {
 		return 'External worktree managed outside the main checkout path.';
-	}
-	if (selectedRow.tags.includes('active')) {
-		return 'This worktree currently owns the running command session.';
 	}
 	return 'Ready to launch with the configured command in this worktree.';
 }
@@ -132,6 +162,27 @@ function SectionHeader({label}: {label: string}) {
 			[{label}]
 		</Text>
 	);
+}
+
+function SectionDivider() {
+	return <Text dimColor> </Text>;
+}
+
+function getOrderedTags(tags: readonly string[]): string[] {
+	const tagPriority: Record<string, number> = {
+		active: 0,
+		main: 1,
+		external: 2,
+		invalid: 3,
+	};
+	return [...tags].sort((a, b) => {
+		const aPriority = tagPriority[a] ?? 10;
+		const bPriority = tagPriority[b] ?? 10;
+		if (aPriority === bPriority) {
+			return a.localeCompare(b);
+		}
+		return aPriority - bPriority;
+	});
 }
 
 export function ActionPanel({
@@ -171,13 +222,28 @@ export function ActionPanel({
 				Selection / Action
 			</Text>
 			<SectionHeader label="Identity" />
-			<Text bold color={selectedRow.tags.includes('active') ? 'green' : undefined} wrap="truncate-end">
+			<Text bold wrap="truncate-end">
 				Branch: {sanitizeInlineText(selectedRow.branch)}
 			</Text>
 			<Text wrap="truncate-end">Path: {sanitizeInlineText(selectedRow.shortPath)}</Text>
 			{showFullPath ? <Text wrap="truncate-end">Full Path: {sanitizeInlineText(selectedRow.path)}</Text> : undefined}
 			<Text wrap="truncate-end">HEAD: {selectedRow.headSha || '-'}</Text>
-			{showTags ? <Text wrap="truncate-end">Tags: {formatTags(selectedRow.tags)}</Text> : undefined}
+			{showTags ? (() => {
+				const visibleTags = getOrderedTags(selectedRow.tags.filter(tag => tag !== 'active'));
+				if (visibleTags.length === 0) {
+					return null;
+				}
+				return (
+					<Box flexDirection="column" gap={1}>
+						{visibleTags.map(tag => (
+							<Box key={tag} flexDirection="row" gap={1}>
+								<Badge color={getTagColor(tag)}>{tag}</Badge>
+							</Box>
+						))}
+					</Box>
+				);
+			})() : undefined}
+			<SectionDivider />
 			<SectionHeader label="Git / PR" />
 			<Text wrap="truncate-end">Upstream: {formatUpstream(selectedRow)}</Text>
 			<Text wrap="truncate-end">Status: {formatWorkingTree(selectedRow)}</Text>
@@ -185,14 +251,11 @@ export function ActionPanel({
 				{getPullRequestLabel(selectedRow)}: {formatPullRequest(selectedRow)}
 			</Text>
 			{pullRequestTitle ? <Text dimColor={selectedRow.pullRequest?.kind === 'found' && selectedRow.pullRequest.state !== 'OPEN'} wrap="truncate-end">{getPullRequestTitleLabel(selectedRow)}: {pullRequestTitle}</Text> : undefined}
+			<SectionDivider />
 			<SectionHeader label="Action" />
-			<Text color={getActionColor(selectedRow)} wrap="truncate-end">
-				{actionMessage}
-			</Text>
+			<StatusMessage variant={getActionVariant(selectedRow, activePath)}>{actionMessage}</StatusMessage>
 			<SectionHeader label="Notes" />
-			<Text dimColor wrap="truncate-end">
-				{getNotes(selectedRow)}
-			</Text>
+			<StatusMessage variant={getNoteVariant(selectedRow)}>{getNotes(selectedRow)}</StatusMessage>
 		</Box>
 	);
 }

@@ -50,11 +50,13 @@ export function LogPanel({
 	width,
 	height,
 	scrollOffset = 0,
+	title = 'Logs (*.log · tail 120)',
 }: {
 	logs: AppLogEntry[];
 	width?: number;
 	height?: number;
 	scrollOffset?: number;
+	title?: string;
 }) {
 	const lines = buildLogLines(logs);
 	const contentViewportHeight = height === undefined ? lines.length : Math.max(1, height - 3);
@@ -74,7 +76,7 @@ export function LogPanel({
 	return (
 		<Box width={width} height={height} borderStyle="round" borderColor="yellow" flexDirection="column" paddingX={1} overflow="hidden">
 			<Text bold color="yellow" wrap="truncate-end">
-				Logs (*.log · tail 120)
+				{title}
 			</Text>
 			<Box height={contentViewportHeight} flexDirection="column" overflow="hidden">
 				{visibleLines.map((line, index) => (

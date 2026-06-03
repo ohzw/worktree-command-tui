@@ -1,6 +1,6 @@
 import path from 'node:path';
 import {execFile} from 'node:child_process';
-import {readdir, readFile} from 'node:fs/promises';
+import {readdir, readFile, stat} from 'node:fs/promises';
 import {promisify} from 'node:util';
 import {loadToolConfig} from './config.js';
 import {readWorktrees, sortWorktrees, toShortPath, type WorktreeRow} from './git-worktrees.js';
@@ -327,18 +327,31 @@ async function readLogs(logsDir: string, activeLogPath: string | null): Promise<
 	try {
 		const entries = (await readdir(logsDir, {withFileTypes: true}))
 			.filter(entry => entry.isFile() && entry.name.endsWith('.log'))
-			.map(entry => ({name: entry.name, path: path.join(logsDir, entry.name)}))
-			.sort((a, b) => {
-				const aIsActive = activeLogPath !== null && a.path === activeLogPath;
-				const bIsActive = activeLogPath !== null && b.path === activeLogPath;
-				if (aIsActive !== bIsActive) {
-					return aIsActive ? -1 : 1;
-				}
-				return a.name.localeCompare(b.name);
-			});
+			.map(entry => ({name: entry.name, path: path.join(logsDir, entry.name)}));
+
+		if (entries.length === 0) {
+			return [];
+		}
+
+		let selectedEntries = entries;
+		if (activeLogPath !== null) {
+			const activeEntry = entries.find(entry => entry.path === activeLogPath);
+			if (activeEntry) {
+				selectedEntries = [activeEntry];
+			}
+		} else {
+			const withStats = await Promise.all(
+				entries.map(async entry => ({
+					...entry,
+					mtimeMs: (await stat(entry.path)).mtimeMs,
+				})),
+			);
+			withStats.sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name));
+			selectedEntries = [withStats[0]!];
+		}
 
 		return await Promise.all(
-			entries.map(async entry => ({
+			selectedEntries.map(async entry => ({
 				name: entry.name,
 				path: entry.path,
 				content: tailLogContent(await readFile(entry.path, 'utf8')),

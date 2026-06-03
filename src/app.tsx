@@ -4,6 +4,7 @@ import {Box, Text, useApp, useInput, useStdin, useStdout, useWindowSize} from 'i
 import {ActionPanel} from './components/ActionPanel.js';
 import {ContextBar} from './components/ContextBar.js';
 import {Header} from './components/Header.js';
+import {FloatingLogWindow} from './components/FloatingLogWindow.js';
 import {LogPanel, buildLogLines} from './components/LogPanel.js';
 import {WorktreeList} from './components/WorktreeList.js';
 import type {AppActions, AppModel, AppStatus} from './core/runtime.js';
@@ -114,6 +115,7 @@ export function App({
 	const [selectionScrollOffset, setSelectionScrollOffset] = useState(0);
 	const [worktreeScrollOffset, setWorktreeScrollOffset] = useState(0);
 	const [logScrollOffset, setLogScrollOffset] = useState(0);
+	const [isLogOverlayOpen, setIsLogOverlayOpen] = useState(false);
 	const [completedAlert, setCompletedAlert] = useState<string | null>(null);
 	const inFlightRef = useRef(false);
 	const logRefreshInFlightRef = useRef(false);
@@ -210,9 +212,11 @@ export function App({
 		: Math.max(3, rootHeight - 11 - logPaneHeight);
 	const selectionScrollPageSize = Math.max(1, Math.floor((paneHeight ?? rootHeight) / 2));
 	const logLineCount = useMemo(() => buildLogLines(model.logs).length, [model.logs]);
-	const logContentViewportHeight = showLogPanel ? Math.max(1, logPaneHeight - 3) : 0;
-	const maxLogScrollOffset = showLogPanel ? Math.max(0, logLineCount - logContentViewportHeight) : 0;
-	const logScrollPageSize = Math.max(1, Math.floor((logContentViewportHeight || rootHeight) / 2));
+	const logViewportHeight = isLogOverlayOpen
+		? Math.max(1, rootHeight - 3)
+		: showLogPanel ? Math.max(1, logPaneHeight - 3) : 0;
+	const maxLogScrollOffset = Math.max(0, logLineCount - logViewportHeight);
+	const logScrollPageSize = Math.max(1, Math.floor((logViewportHeight || rootHeight) / 2));
 
 	function moveSelection(nextIndex: number): void {
 		if (model.rows.length === 0) {
@@ -248,6 +252,37 @@ export function App({
 	}
 
 	useInput((input, key) => {
+		if (isLogOverlayOpen) {
+			if (key.escape || input === 'q' || input === 'L') {
+				setIsLogOverlayOpen(false);
+				return;
+			}
+			if (key.upArrow || input === 'k') {
+				setLogScrollOffset(current => Math.min(maxLogScrollOffset, current + 1));
+				return;
+			}
+			if (key.downArrow || input === 'j') {
+				setLogScrollOffset(current => Math.max(0, current - 1));
+				return;
+			}
+			if (input === 'g') {
+				setLogScrollOffset(maxLogScrollOffset);
+				return;
+			}
+			if (input === 'G') {
+				setLogScrollOffset(0);
+				return;
+			}
+			if (input === '[' || key.pageUp) {
+				setLogScrollOffset(current => Math.min(maxLogScrollOffset, current + logScrollPageSize));
+				return;
+			}
+			if (input === ']' || key.pageDown) {
+				setLogScrollOffset(current => Math.max(0, current - logScrollPageSize));
+				return;
+			}
+			return;
+		}
 		if (key.escape || input === 'q') {
 			exit();
 			return;
@@ -266,6 +301,10 @@ export function App({
 		}
 		if (input === 'G') {
 			moveSelection(model.rows.length - 1);
+			return;
+		}
+		if (input === 'L') {
+			setIsLogOverlayOpen(true);
 			return;
 		}
 		if (input === ']') {
@@ -329,7 +368,13 @@ export function App({
 		const onData = (data: Buffer | string) => {
 			const events = parseMouseWheelEvents(typeof data === 'string' ? data : data.toString('utf8'));
 			for (const event of events) {
-				const isLogPaneEvent = showLogPanel
+				if (isLogOverlayOpen) {
+					setLogScrollOffset(current => Math.max(0, Math.min(maxLogScrollOffset, current - event.delta * mouseWheelLineStep)));
+					continue;
+				}
+
+				const isLogPaneEvent = !isLogOverlayOpen
+					&& showLogPanel
 					&& event.y !== undefined
 					&& logPaneTop !== undefined
 					&& logPaneBottom !== undefined
@@ -380,7 +425,7 @@ export function App({
 				stdout.write(DISABLE_MOUSE_TRACKING);
 			}
 		};
-	}, [stdin, stdout, listWidth, stackedLayout, listPaneViewportHeight, mouseWheelLineStep, model.rows.length, showLogPanel, logPaneTop, logPaneBottom, maxLogScrollOffset, worktreePaneRight, selectionPaneLeft, bodyPaneTop, bodyPaneBottom]);
+	}, [stdin, stdout, listWidth, stackedLayout, listPaneViewportHeight, mouseWheelLineStep, model.rows.length, showLogPanel, logPaneTop, logPaneBottom, maxLogScrollOffset, worktreePaneRight, selectionPaneLeft, bodyPaneTop, bodyPaneBottom, isLogOverlayOpen]);
 
 	useEffect(() => {
 		if (listPaneViewportHeight === undefined) {
@@ -400,12 +445,23 @@ export function App({
 	}, [selectedIndex, listPaneViewportHeight, model.rows.length]);
 
 	useEffect(() => {
-		if (!showLogPanel) {
+		if (!showLogPanel && !isLogOverlayOpen) {
 			setLogScrollOffset(0);
 			return;
 		}
 		setLogScrollOffset(current => Math.min(current, maxLogScrollOffset));
-	}, [showLogPanel, maxLogScrollOffset]);
+	}, [showLogPanel, isLogOverlayOpen, maxLogScrollOffset]);
+
+	if (isLogOverlayOpen) {
+		return (
+			<FloatingLogWindow
+				logs={model.logs}
+				width={Math.max(1, rootWidth - 1)}
+				height={rootHeight}
+				scrollOffset={logScrollOffset}
+			/>
+		);
+	}
 
 	if (minimalLayout) {
 		return (
@@ -415,7 +471,7 @@ export function App({
 				</Text>
 				{rootHeight >= 2 ? <Text wrap="truncate-end">S:{selected?.branch ?? '-'}</Text> : null}
 				{rootHeight >= 3 ? <Text wrap="truncate-end">T:{model.status.kind}</Text> : null}
-				{rootHeight >= 4 ? <Text dimColor wrap="truncate-end">↑↓jk↵q</Text> : null}
+				{rootHeight >= 4 ? <Text dimColor wrap="truncate-end">↑↓jk↵Lq</Text> : null}
 			</Box>
 		);
 	}
@@ -435,7 +491,7 @@ export function App({
 						<Text wrap="truncate-end">Status: {model.status.kind} — {model.status.message}</Text>
 					)}
 				<Text dimColor wrap="truncate-end">
-					Keys: ↑↓/jk g/G ↵ s r q · Resize terminal for split view
+					Keys: ↑↓/jk g/G ↵ L s r q · Resize terminal for split view
 				</Text>
 			</Box>
 		);

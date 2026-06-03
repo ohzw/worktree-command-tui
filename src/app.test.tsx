@@ -98,6 +98,7 @@ it('renders colored pane labels and active marker in the main layout', () => {
 	expect(lastFrame()).toContain('idle');
 	expect(lastFrame()).toContain('Wheel/PgUp/PgDn list & selection scroll');
 	expect(lastFrame()).toContain('[/] log scroll');
+	expect(lastFrame()).toContain('L full-screen logs');
 	expect(lastFrame()).toContain('* feat/a');
 });
 
@@ -159,6 +160,20 @@ it('shows the log pane on tall split terminals', () => {
 	expect(lastFrame()).toContain('server started');
 });
 
+it('opens and closes the full-screen log view with L', async () => {
+	const model = createModel();
+	const {lastFrame, stdin} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 40}} />,
+	);
+	expect(lastFrame()).not.toContain('Logs (*.log · tail 120 · full screen)');
+	stdin.write('L');
+	await waitForInput();
+	expect(lastFrame()).toContain('Logs (*.log · tail 120 · full screen)');
+	stdin.write('q');
+	await waitForInput();
+	expect(lastFrame()).not.toContain('Logs (*.log · tail 120 · full screen)');
+});
+
 it('scrolls the log pane through the tailed lines', async () => {
 	const model = createModel({
 		logs: [{
@@ -182,6 +197,29 @@ it('scrolls the log pane through the tailed lines', async () => {
 	await waitForInput();
 	await waitForInput();
 	expect(lastFrame()).toContain('row-12');
+});
+
+it('scrolls the full-screen log view with keyboard controls', async () => {
+	const model = createModel({
+		logs: [{
+			name: 'feat-a.log',
+			path: '/repo/.git/worktree-command-tui/logs/feat-a.log',
+			content: Array.from({length: 20}, (_, index) => `wide-${String(index + 1).padStart(2, '0')}`).join('\n'),
+		}],
+	});
+	const {lastFrame, stdin} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 40}} />,
+	);
+	stdin.write('L');
+	await waitForInput();
+	expect(lastFrame()).toContain('wide-20');
+	stdin.write('[');
+	await waitForInput();
+	await waitForInput();
+	expect(lastFrame()).toContain('wide-08');
+	stdin.write('G');
+	await waitForInput();
+	expect(lastFrame()).toContain('wide-20');
 });
 
 it('refreshes logs in near real time while running', async () => {
@@ -370,7 +408,7 @@ it('renders a minimal fallback shell on very short terminals', () => {
 	expect(lastFrame()).toContain('A:develop');
 	expect(lastFrame()).toContain('S:develop');
 	expect(lastFrame()).toContain('T:idle');
-	expect(lastFrame()).toContain('↑↓jk↵q');
+	expect(lastFrame()).toContain('↑↓jk↵Lq');
 });
 
 it('shows completion alert after starting a worktree', async () => {
@@ -408,7 +446,7 @@ it('renders a minimal fallback shell on extremely small terminals', () => {
 	expect(lastFrame()).toContain('A:devel…');
 	expect(lastFrame()).toContain('S:devel…');
 	expect(lastFrame()).toContain('T:idle');
-	expect(lastFrame()).toContain('↑↓jk↵q');
+	expect(lastFrame()).toContain('↑↓jk↵Lq');
 });
 
 it('keeps the active branch visible when header metadata is long', () => {

@@ -32,7 +32,7 @@ export function ContextBar({status}: {status: AppStatus}) {
 				</Text>
 			)}
 			<Text dimColor wrap="truncate-end">
-				Keys: ↑↓/jk move  g/G first/last  Wheel/PgUp/PgDn list & selection scroll  Enter start/switch  s stop  r refresh  q quit
+				Keys: ↑↓/jk move  g/G first/last  Wheel/PgUp/PgDn list & selection scroll  [/] log scroll  Enter start/switch  s stop  r refresh  q quit
 			</Text>
 		</Box>
 	);

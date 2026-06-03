@@ -10,6 +10,7 @@ function makeFakeActions(result: AppModel): AppActions {
 		start: vi.fn(async () => result),
 		stop: vi.fn(async () => result),
 		refresh: vi.fn(async () => result),
+		refreshLogs: vi.fn(async () => result.logs),
 	};
 }
 
@@ -25,6 +26,9 @@ function createModel(overrides: Partial<AppModel> = {}): AppModel {
 		activePath: '/repo/.worktree/feat-a',
 		activeBranch: 'feat/a',
 		status: {kind: 'idle', message: 'ready'},
+		logs: [
+			{name: 'feat-a.log', path: '/repo/.git/worktree-command-tui/logs/feat-a.log', content: 'ready\nserver started'},
+		],
 		...overrides,
 	};
 }
@@ -93,6 +97,7 @@ it('renders colored pane labels and active marker in the main layout', () => {
 	expect(lastFrame()).toContain('Selection / Action');
 	expect(lastFrame()).toContain('idle');
 	expect(lastFrame()).toContain('Wheel/PgUp/PgDn list & selection scroll');
+	expect(lastFrame()).toContain('[/] log scroll');
 	expect(lastFrame()).toContain('* feat/a');
 });
 
@@ -143,6 +148,60 @@ it('stacks panes responsively on medium-width terminals when there is enough ver
 	expect(lastFrame()).toContain('Worktrees');
 	expect(lastFrame()).toContain('Selection / Action');
 	expect(lastFrame()).toContain('> # develop');
+});
+
+it('shows the log pane on tall split terminals', () => {
+	const model = createModel();
+	const {lastFrame} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 40}} />,
+	);
+	expect(lastFrame()).toContain('Logs (*.log · tail 120)');
+	expect(lastFrame()).toContain('server started');
+});
+
+it('scrolls the log pane through the tailed lines', async () => {
+	const model = createModel({
+		logs: [{
+			name: 'feat-a.log',
+			path: '/repo/.git/worktree-command-tui/logs/feat-a.log',
+			content: Array.from({length: 12}, (_, index) => `row-${String(index + 1).padStart(2, '0')}`).join('\n'),
+		}],
+	});
+	const {lastFrame, stdin} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 40}} />,
+	);
+	expect(lastFrame()).toContain('row-12');
+	expect(lastFrame()).not.toContain('row-01');
+	stdin.write('[');
+	await waitForInput();
+	await waitForInput();
+	expect(lastFrame()).toContain('row-04');
+	expect(lastFrame()).toContain('row-09');
+	expect(lastFrame()).not.toContain('row-12');
+	stdin.write(']');
+	await waitForInput();
+	await waitForInput();
+	expect(lastFrame()).toContain('row-12');
+});
+
+it('refreshes logs in near real time while running', async () => {
+	const initialModel = createModel({status: {kind: 'running', message: 'started feat/a'}});
+	const refreshedLogs = [{
+		name: 'feat-a.log',
+		path: '/repo/.git/worktree-command-tui/logs/feat-a.log',
+		content: 'ready\nserver started\nnew output',
+	}];
+	const actions = {
+		...makeFakeActions(initialModel),
+		refreshLogs: vi.fn(async () => refreshedLogs),
+	};
+	const {lastFrame} = render(
+		<App initialModel={initialModel} actions={actions} windowSizeOverride={{columns: 120, rows: 40}} />,
+	);
+	await new Promise(resolve => setTimeout(resolve, 450));
+	await waitForInput();
+	expect(actions.refreshLogs).toHaveBeenCalled();
+	expect(lastFrame()).toContain('new output');
 });
 it('uses split layout when the stacked breakpoint no longer applies', () => {
 	const manyRows: AppModel['rows'] = Array.from({length: 10}, (_, index) => ({
@@ -253,11 +312,56 @@ it('scrolls worktree list with SGR mouse wheel input', async () => {
 	);
 	expect(lastFrame()).not.toContain('feat-8');
 	expect(lastFrame()).toContain('│ > * feat-0');
-	stdin.write('\u001B[<65;10;5M');
+	stdin.write('\u001B[<65;10;10M');
 	await waitForInput();
 	await waitForInput();
 	expect(lastFrame()).toContain('│   - feat-3');
 	expect(lastFrame()).not.toContain('│ > - feat-0');
+});
+
+it('scrolls selection details with SGR mouse wheel in tall split layout', async () => {
+	const model = createModel({
+		rows: [{
+			path: '/repo/.worktree/feat-a',
+			shortPath: '.worktree/feat-a',
+			branch: 'feat/a',
+			tags: ['active'],
+			headSha: '46af3f1c',
+			upstream: {branch: 'origin/develop', ahead: 4, behind: 24},
+			workingTree: {staged: 1, unstaged: 2, untracked: 3, conflicts: 0},
+			pullRequest: {kind: 'found', number: 2125, title: 'Selection pane metadata', url: 'https://github.com/finn-inc/reclaim-the-forest/pull/2125', state: 'OPEN', isDraft: true, baseBranch: 'develop'},
+		}] as AppModel['rows'],
+		activePath: '/repo/.worktree/feat-a',
+		activeBranch: 'feat/a',
+		logs: [{name: 'feat-a.log', path: '/tmp/feat-a.log', content: 'a\nb\nc\nd\ne\nf\ng'}],
+	});
+	const {lastFrame, stdin} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 34}} />,
+	);
+	expect(lastFrame()).not.toContain('Already active. Press s to stop the current session.');
+	stdin.write('\u001B[<65;90;12M');
+	await waitForInput();
+	await waitForInput();
+	expect(lastFrame()).toContain('Already active. Press s to stop the current session.');
+});
+
+it('scrolls the log pane with SGR mouse wheel input', async () => {
+	const model = createModel({
+		logs: [{
+			name: 'feat-a.log',
+			path: '/repo/.git/worktree-command-tui/logs/feat-a.log',
+			content: Array.from({length: 12}, (_, index) => `row-${String(index + 1).padStart(2, '0')}`).join('\n'),
+		}],
+	});
+	const {lastFrame, stdin} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 40}} />,
+	);
+	expect(lastFrame()).toContain('row-12');
+	stdin.write('\u001B[<64;80;30M');
+	await waitForInput();
+	await waitForInput();
+	expect(lastFrame()).toContain('row-04');
+	expect(lastFrame()).not.toContain('row-12');
 });
 
 it('renders a minimal fallback shell on very short terminals', () => {
@@ -524,6 +628,8 @@ it('keeps the same worktree selected when start reorders the list', async () => 
 	const {lastFrame, stdin} = render(<App initialModel={initial} actions={{...makeFakeActions(reordered), start: vi.fn(async () => reordered)}} windowSizeOverride={{columns: 120, rows: 30}} />);
 	stdin.write('\r');
 	await waitForInput();
+	await waitForInput();
+	await waitForInput();
 	expect(lastFrame()).toContain('Active: feat/b');
 	expect(lastFrame()).toContain('Path: .worktree/feat-b');
 	expect(lastFrame()).toContain('[Action]');
@@ -541,6 +647,7 @@ it('converts start failures into error status instead of crashing the app', asyn
 	);
 	const {lastFrame, stdin} = render(<App initialModel={model} actions={{...makeFakeActions(model), start}} windowSizeOverride={{columns: 120, rows: 30}} />);
 	stdin.write('\r');
+	await waitForInput();
 	await waitForInput();
 	await waitForInput();
 	expect(lastFrame()).toContain('spawn failed: /tmp/logs/rojo-with-a-very-long-file-name-that-keeps-going-until-it-wraps-acro');

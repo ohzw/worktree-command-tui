@@ -1,26 +1,38 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {Box, useApp, useInput} from 'ink';
+import {ActionPanel} from './components/ActionPanel.js';
+import {ContextBar} from './components/ContextBar.js';
 import {Header} from './components/Header.js';
 import {WorktreeList} from './components/WorktreeList.js';
-import {Footer} from './components/Footer.js';
-import {StatusBar} from './components/StatusBar.js';
 import type {AppActions, AppModel} from './core/runtime.js';
+
+function getNextSelectedPath(rows: AppModel['rows'], currentPath: string | null): string | null {
+	if (rows.length === 0) {
+		return null;
+	}
+	if (currentPath && rows.some(row => row.path === currentPath)) {
+		return currentPath;
+	}
+	return rows[0]!.path;
+}
 
 export function App({initialModel, actions}: {initialModel: AppModel; actions: AppActions}) {
 	const {exit} = useApp();
 	const [model, setModel] = useState(initialModel);
-	const [selectedIndex, setSelectedIndex] = useState(0);
+	const [selectedPath, setSelectedPath] = useState<string | null>(initialModel.rows[0]?.path ?? null);
 	const inFlightRef = useRef(false);
 
 	useEffect(() => {
-		setSelectedIndex(index => {
-			if (model.rows.length === 0) {
-				return 0;
-			}
-			return Math.min(index, model.rows.length - 1);
-		});
-	}, [model.rows.length]);
+		setSelectedPath(currentPath => getNextSelectedPath(model.rows, currentPath));
+	}, [model.rows]);
 
+	const selectedIndex = useMemo(() => {
+		if (selectedPath === null) {
+			return 0;
+		}
+		const foundIndex = model.rows.findIndex(row => row.path === selectedPath);
+		return foundIndex >= 0 ? foundIndex : 0;
+	}, [model.rows, selectedPath]);
 	const selected = model.rows[selectedIndex];
 
 	async function apply(action: () => Promise<AppModel>) {
@@ -47,11 +59,19 @@ export function App({initialModel, actions}: {initialModel: AppModel; actions: A
 			return;
 		}
 		if (key.upArrow) {
-			setSelectedIndex(index => Math.max(0, index - 1));
+			if (model.rows.length === 0) {
+				return;
+			}
+			const nextIndex = Math.max(0, selectedIndex - 1);
+			setSelectedPath(model.rows[nextIndex]!.path);
 			return;
 		}
 		if (key.downArrow) {
-			setSelectedIndex(index => Math.min(Math.max(model.rows.length - 1, 0), index + 1));
+			if (model.rows.length === 0) {
+				return;
+			}
+			const nextIndex = Math.min(model.rows.length - 1, selectedIndex + 1);
+			setSelectedPath(model.rows[nextIndex]!.path);
 			return;
 		}
 		if (inFlightRef.current) {
@@ -82,10 +102,12 @@ export function App({initialModel, actions}: {initialModel: AppModel; actions: A
 
 	return (
 		<Box flexDirection="column">
-			<Header repoName={model.repoName} namespace={model.namespace} activeBranch={model.activeBranch} activePath={model.activePath} />
-			<WorktreeList rows={model.rows} selectedIndex={selectedIndex} />
-			<StatusBar status={model.status} />
-			<Footer />
+			<Header repoName={model.repoName} namespace={model.namespace} activeBranch={model.activeBranch} />
+			<Box flexDirection="row">
+				<WorktreeList rows={model.rows} selectedIndex={selectedIndex} />
+				<ActionPanel selectedRow={selected} activePath={model.activePath} />
+			</Box>
+			<ContextBar status={model.status} />
 		</Box>
 	);
 }

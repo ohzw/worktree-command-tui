@@ -11,10 +11,12 @@ export function Header({
 	activeBranch: string | null;
 }) {
 	return (
-		<Box flexDirection="column" marginBottom={1}>
-			<Text wrap="truncate-end">worktree-command-tui · {repoName} · {namespace}</Text>
-			<Text color={activeBranch ? 'green' : undefined} wrap="truncate-end">
-				active: {activeBranch ?? '-'}
+		<Box borderStyle="round" flexDirection="column" paddingX={1} marginBottom={1}>
+			<Text bold wrap="truncate-end">
+				Worktree Command TUI · Repo: {repoName}
+			</Text>
+			<Text wrap="truncate-end">
+				Active: {activeBranch ?? '-'} · Namespace: {namespace}
 			</Text>
 		</Box>
 	);

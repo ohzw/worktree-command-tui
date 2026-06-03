@@ -33,7 +33,7 @@ export function ActionPanel({selectedRow, activePath}: {selectedRow: AppRow | un
 	if (!selectedRow) {
 		return (
 			<Box flexGrow={1} borderStyle="round" flexDirection="column" paddingX={1}>
-				<Text bold>Selection</Text>
+				<Text bold>Selection / Action</Text>
 				<Text dimColor>No worktrees found.</Text>
 			</Box>
 		);
@@ -41,14 +41,14 @@ export function ActionPanel({selectedRow, activePath}: {selectedRow: AppRow | un
 
 	return (
 		<Box flexGrow={1} borderStyle="round" flexDirection="column" paddingX={1}>
-			<Text bold>Selection</Text>
+			<Text bold>Selection / Action</Text>
 			<Text bold wrap="truncate-end">
-				{selectedRow.branch}
+				Branch: {selectedRow.branch}
 			</Text>
-			<Text wrap="truncate-end">Path : {selectedRow.path}</Text>
-			<Text wrap="truncate-end">Tags : {formatTags(selectedRow.tags)}</Text>
+			<Text wrap="truncate-end">Path: {selectedRow.path}</Text>
+			<Text wrap="truncate-end">Tags: {formatTags(selectedRow.tags)}</Text>
 			<Text wrap="truncate-end">Action: {getActionMessage(selectedRow, activePath)}</Text>
-			<Text wrap="truncate-end">{getNotes(selectedRow)}</Text>
+			<Text wrap="truncate-end">Notes: {getNotes(selectedRow)}</Text>
 		</Box>
 	);
 }

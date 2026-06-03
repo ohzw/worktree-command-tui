@@ -1,8 +1,9 @@
 import React from 'react';
 import {render} from 'ink-testing-library';
 import {expect, it, vi} from 'vitest';
-import {App} from './app.js';
+import {App, getShellDimensions, shouldUseCompactLayout, shouldUseMinimalLayout} from './app.js';
 import type {AppActions, AppModel} from './core/runtime.js';
+import {APP_RENDER_OPTIONS} from './render-options.js';
 
 function makeFakeActions(result: AppModel): AppActions {
 	return {
@@ -18,7 +19,26 @@ async function waitForInput(): Promise<void> {
 	await promise;
 }
 
-it('renders dual-pane metadata, list state, and selection detail', () => {
+it('uses alternate screen render options', () => {
+	expect(APP_RENDER_OPTIONS).toEqual({alternateScreen: true, exitOnCtrlC: true});
+});
+
+it('never grows the shell beyond the available terminal viewport', () => {
+	expect(getShellDimensions(8, 8)).toEqual({rootWidth: 8, rootHeight: 8, listWidth: 1});
+	expect(getShellDimensions(45, 12)).toEqual({rootWidth: 45, rootHeight: 12, listWidth: 13});
+	expect(getShellDimensions(100, 30)).toEqual({rootWidth: 100, rootHeight: 30, listWidth: 31});
+});
+
+it('switches to compact and minimal layouts for constrained terminals', () => {
+	expect(shouldUseMinimalLayout(8, 4)).toBe(true);
+	expect(shouldUseMinimalLayout(30, 8)).toBe(false);
+	expect(shouldUseCompactLayout(30, 8, 1)).toBe(true);
+	expect(shouldUseCompactLayout(50, 16, 10)).toBe(true);
+	expect(shouldUseCompactLayout(72, 20, 10)).toBe(true);
+	expect(shouldUseCompactLayout(100, 30, 9)).toBe(false);
+});
+
+it('renders fullscreen shell with framed panes', () => {
 	const model: AppModel = {
 		repoName: 'reclaim-the-forest',
 		namespace: 'rojo-serve',
@@ -32,18 +52,54 @@ it('renders dual-pane metadata, list state, and selection detail', () => {
 		status: {kind: 'idle', message: 'ready'},
 	};
 	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} />);
-	expect(lastFrame()).toContain('reclaim-the-forest');
-	expect(lastFrame()).toContain('rojo-serve');
-	expect(lastFrame()).toContain('active: feat/a');
+	expect(lastFrame()).toContain('Worktree Command TUI · Repo: reclaim-the-forest');
+	expect(lastFrame()).toContain('Active: feat/a');
+	expect(lastFrame()).toContain('Namespace: rojo-serve');
 	expect(lastFrame()).toContain('Worktrees');
-	expect(lastFrame()).toContain('Selection');
-	expect(lastFrame()).toContain('Path : /repo');
-	expect(lastFrame()).toContain('Tags : main');
-	expect(lastFrame()).toContain('Enter start/switch');
-	expect(lastFrame()).toContain('s stop');
+	expect(lastFrame()).toContain('Selection / Action');
+	expect(lastFrame()).toContain('Path: /repo');
+	expect(lastFrame()).toContain('Tags: main');
+	expect(lastFrame()).toContain('Status: idle — ready');
+	expect(lastFrame()).toContain('Keys: ↑↓ move  Enter start/switch  s stop  r refresh  q quit');
 });
 
-it('keeps the active branch visible when the header is truncated', () => {
+it('renders a compact fallback shell on short terminals', () => {
+	const model: AppModel = {
+		repoName: 'reclaim-the-forest',
+		namespace: 'rojo-serve',
+		rows: [{path: '/repo', shortPath: '.', branch: 'develop', tags: ['main']}],
+		activePath: '/repo',
+		activeBranch: 'develop',
+		status: {kind: 'idle', message: 'ready'},
+	};
+	const {lastFrame} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 30, rows: 8}} />,
+	);
+	expect(lastFrame()).toContain('Active: develop');
+	expect(lastFrame()).toContain('Selected: develop');
+	expect(lastFrame()).toContain('Status: idle — ready');
+	expect(lastFrame()).toContain('Keys: ↑↓ Enter s r q · Re…');
+});
+
+it('renders a minimal fallback shell on extremely small terminals', () => {
+	const model: AppModel = {
+		repoName: 'reclaim-the-forest',
+		namespace: 'rojo-serve',
+		rows: [{path: '/repo', shortPath: '.', branch: 'develop', tags: ['main']}],
+		activePath: '/repo',
+		activeBranch: 'develop',
+		status: {kind: 'idle', message: 'ready'},
+	};
+	const {lastFrame} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 8, rows: 4}} />,
+	);
+	expect(lastFrame()).toContain('A:devel…');
+	expect(lastFrame()).toContain('S:devel…');
+	expect(lastFrame()).toContain('T:idle');
+	expect(lastFrame()).toContain('↑↓↵srq');
+});
+
+it('keeps the active branch visible when header metadata is long', () => {
 	const model: AppModel = {
 		repoName: 'reclaim-the-forest-with-a-long-name',
 		namespace: 'rojo-serve-with-a-long-namespace',
@@ -53,7 +109,7 @@ it('keeps the active branch visible when the header is truncated', () => {
 		status: {kind: 'idle', message: 'ready'},
 	};
 	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} />);
-	expect(lastFrame()).toContain('active: feature/this-is-a-very-long-branch-name-that-should-still-be-visible');
+	expect(lastFrame()).toContain('Active: feature/this-is-a-very-long-branch-name-that-should-still-be-visible');
 });
 
 it('truncates long branch labels in the left pane', () => {
@@ -66,7 +122,7 @@ it('truncates long branch labels in the left pane', () => {
 		status: {kind: 'idle', message: 'ready'},
 	};
 	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} />);
-	expect(lastFrame()).toContain('feature/this-is-a-very-lon…');
+	expect(lastFrame()).toContain('feature/this-is-a-ve…');
 });
 
 it('truncates long branch and path values in the selection pane', () => {
@@ -84,8 +140,8 @@ it('truncates long branch and path values in the selection pane', () => {
 		status: {kind: 'idle', message: 'ready'},
 	};
 	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} />);
-	expect(lastFrame()).toContain('feature/this-is-a-very-long-branch-name-that-wraps-and-keeps-going-pas…');
-	expect(lastFrame()).toContain('Path : /repo/.worktree/feature/this/is/a/very/long/path/that/keeps/goi…');
+	expect(lastFrame()).toContain('Branch: feature/this-is-a-very-long-branch-name-that-wraps-and-keep…');
+	expect(lastFrame()).toContain('Path: /repo/.worktree/feature/this/is/a/very/long/path/that/keeps/g…');
 });
 
 it('shows invalid reason in the detail pane before start is attempted', () => {
@@ -99,7 +155,7 @@ it('shows invalid reason in the detail pane before start is attempted', () => {
 	};
 	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} />);
 	expect(lastFrame()).toContain('Cannot start this worktree.');
-	expect(lastFrame()).toContain('Missing required files: default.project.json');
+	expect(lastFrame()).toContain('Notes: Missing required files: default.project.json');
 });
 
 it('shows invalid reason instead of starting when enter is pressed on invalid worktree', async () => {
@@ -119,7 +175,7 @@ it('shows invalid reason instead of starting when enter is pressed on invalid wo
 	expect(lastFrame()).toContain('Missing required files: default.project.json');
 });
 
-it('keeps the same worktree selected when start reorders the list', async () => {
+it('keeps the same worktree selected when start reorders the list', () => {
 	const initial: AppModel = {
 		repoName: 'reclaim-the-forest',
 		namespace: 'rojo-serve',
@@ -145,10 +201,11 @@ it('keeps the same worktree selected when start reorders the list', async () => 
 	};
 	const {lastFrame, stdin} = render(<App initialModel={initial} actions={{...makeFakeActions(reordered), start: vi.fn(async () => reordered)}} />);
 	stdin.write('\r');
-	await waitForInput();
-	expect(lastFrame()).toContain('active: feat/b');
-	expect(lastFrame()).toContain('Path : /repo/.worktree/feat-b');
-	expect(lastFrame()).toContain('Already active. Press s to stop the current session.');
+	return waitForInput().then(() => {
+		expect(lastFrame()).toContain('Active: feat/b');
+		expect(lastFrame()).toContain('Path: /repo/.worktree/feat-b');
+		expect(lastFrame()).toContain('Action: Already active. Press s to stop the current session.');
+	});
 });
 
 it('converts start failures into error status instead of crashing the app', async () => {
@@ -167,7 +224,7 @@ it('converts start failures into error status instead of crashing the app', asyn
 	stdin.write('\r');
 	await waitForInput();
 	await waitForInput();
-	expect(lastFrame()).toContain('spawn failed: /tmp/logs/rojo-with-a-very-long-file-name-that-keeps-going-until-it-w…');
+	expect(lastFrame()).toContain('Status: error — spawn failed: /tmp/logs/rojo-with-a-very-long-file-name-that-keeps-going-un…');
 });
 
 it('treats selecting the already-active worktree as a no-op refresh', async () => {

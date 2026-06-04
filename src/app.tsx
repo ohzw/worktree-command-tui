@@ -117,7 +117,9 @@ export function App({
 	const [logScrollOffset, setLogScrollOffset] = useState(0);
 	const [isLogOverlayOpen, setIsLogOverlayOpen] = useState(false);
 	const [completedAlert, setCompletedAlert] = useState<string | null>(null);
-	const inFlightRef = useRef(false);
+	const userActionInFlightRef = useRef(false);
+	const backgroundRefreshInFlightRef = useRef(false);
+	const actionGenerationRef = useRef(0);
 	const logRefreshInFlightRef = useRef(false);
 	const previousStatusRef = useRef<AppStatus['kind']>(initialModel.status.kind);
 	const alertTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -166,13 +168,13 @@ export function App({
 		}
 
 		const fullRefreshInterval = setInterval(() => {
-			if (inFlightRef.current) {
+			if (userActionInFlightRef.current || backgroundRefreshInFlightRef.current) {
 				return;
 			}
-			void apply(() => actions.refresh());
+			void apply(() => actions.refresh(), {blocksInput: false});
 		}, 1500);
 		const logRefreshInterval = setInterval(() => {
-			if (inFlightRef.current || logRefreshInFlightRef.current) {
+			if (userActionInFlightRef.current || backgroundRefreshInFlightRef.current || logRefreshInFlightRef.current) {
 				return;
 			}
 			logRefreshInFlightRef.current = true;
@@ -233,21 +235,41 @@ export function App({
 		setCompletedAlert(null);
 	}
 
-	async function apply(action: () => Promise<AppModel>) {
-		inFlightRef.current = true;
+	function invalidateBackgroundRefreshes(): void {
+		actionGenerationRef.current += 1;
+	}
+
+	async function apply(action: () => Promise<AppModel>, options: {blocksInput?: boolean} = {}) {
+		const blocksInput = options.blocksInput ?? true;
+		const generation = blocksInput ? actionGenerationRef.current + 1 : actionGenerationRef.current;
+		if (blocksInput) {
+			actionGenerationRef.current = generation;
+			userActionInFlightRef.current = true;
+		} else {
+			backgroundRefreshInFlightRef.current = true;
+		}
+
 		try {
 			const next = await action();
-			setModel(next);
+			if (blocksInput || (generation === actionGenerationRef.current && !userActionInFlightRef.current)) {
+				setModel(next);
+			}
 		} catch (error) {
-			setModel(current => ({
-				...current,
-				status: {
-					kind: 'error',
-					message: error instanceof Error ? error.message : String(error),
-				},
-			}));
+			if (blocksInput || (generation === actionGenerationRef.current && !userActionInFlightRef.current)) {
+				setModel(current => ({
+					...current,
+					status: {
+						kind: 'error',
+						message: error instanceof Error ? error.message : String(error),
+					},
+				}));
+			}
 		} finally {
-			inFlightRef.current = false;
+			if (blocksInput) {
+				userActionInFlightRef.current = false;
+			} else {
+				backgroundRefreshInFlightRef.current = false;
+			}
 		}
 	}
 
@@ -323,16 +345,18 @@ export function App({
 			setSelectionScrollOffset(current => Math.max(0, current - selectionScrollPageSize));
 			return;
 		}
-		if (inFlightRef.current) {
+		if (userActionInFlightRef.current) {
 			return;
 		}
 		if (key.return && selected) {
 			if (selected.invalidReason) {
+				invalidateBackgroundRefreshes();
 				setModel(current => ({...current, status: {kind: 'error', message: selected.invalidReason!}}));
 				clearTransientAlert();
 				return;
 			}
 			if (selected.path === model.activePath) {
+				invalidateBackgroundRefreshes();
 				setModel(current => ({...current, status: {kind: 'idle', message: 'already active'}}));
 				clearTransientAlert();
 				return;

@@ -643,6 +643,37 @@ it('shows invalid reason instead of starting when enter is pressed on invalid wo
 	expect(lastFrame()).toContain('Missing required files: default.project.json');
 });
 
+it('keeps invalid enter feedback when a background refresh completes', async () => {
+	const invalidReason = 'Missing required files: default.project.json';
+	const model = createModel({
+		rows: [
+			{path: '/repo', shortPath: '.', branch: 'develop', tags: ['active', 'main']},
+			{path: '/bad', shortPath: '/bad', branch: 'fix/bad', tags: ['invalid'], invalidReason},
+		],
+		activePath: '/repo',
+		activeBranch: 'develop',
+		status: {kind: 'running', message: 'Active: develop'},
+	});
+	const refreshed = Promise.withResolvers<AppModel>();
+	const start = vi.fn();
+	const refresh = vi.fn(async () => refreshed.promise);
+	const {lastFrame, stdin} = render(<App initialModel={model} actions={{...makeFakeActions(model), refresh, start}} windowSizeOverride={{columns: 120, rows: 30}} />);
+
+	await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1), {timeout: 3000});
+	stdin.write('j');
+	await waitForInput();
+	stdin.write('\r');
+	await waitForInput();
+	expect(start).not.toHaveBeenCalled();
+	expect(lastFrame()).toContain('Status: error');
+	expect(lastFrame()).toContain(invalidReason);
+
+	refreshed.resolve(model);
+	await waitForInput();
+	expect(lastFrame()).toContain('Status: error');
+	expect(lastFrame()).toContain(invalidReason);
+});
+
 it('keeps the same worktree selected when start reorders the list', async () => {
 	const initial = createModel({
 		rows: [
@@ -705,6 +736,30 @@ it('treats selecting the already-active worktree as a no-op refresh', async () =
 	expect(lastFrame()).toContain('already active');
 });
 
+it('keeps already-active enter feedback when a background refresh completes', async () => {
+	const model = createModel({
+		rows: [{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: ['active']}],
+		activePath: '/repo/.worktree/feat-a',
+		activeBranch: 'feat/a',
+		status: {kind: 'running', message: 'Active: feat/a'},
+	});
+	const refreshed = Promise.withResolvers<AppModel>();
+	const start = vi.fn();
+	const refresh = vi.fn(async () => refreshed.promise);
+	const {lastFrame, stdin} = render(<App initialModel={model} actions={{...makeFakeActions(model), refresh, start}} windowSizeOverride={{columns: 120, rows: 30}} />);
+
+	await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1), {timeout: 3000});
+
+	stdin.write('\r');
+	await waitForInput();
+	expect(start).not.toHaveBeenCalled();
+	expect(lastFrame()).toContain('already active');
+
+	refreshed.resolve(model);
+	await waitForInput();
+	expect(lastFrame()).toContain('already active');
+});
+
 it('ignores repeated enter presses while start is already in flight', async () => {
 	const model = createModel({
 		rows: [{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: []}],
@@ -720,4 +775,52 @@ it('ignores repeated enter presses while start is already in flight', async () =
 	expect(start).toHaveBeenCalledTimes(1);
 	deferred.resolve({...model, status: {kind: 'running', message: 'started feat/a'}});
 	await waitForInput();
+});
+
+it('starts the selected worktree when enter is pressed during a background refresh', async () => {
+	const model = createModel({
+		rows: [
+			{path: '/repo', shortPath: '.', branch: 'develop', tags: ['active', 'main']},
+			{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: []},
+		],
+		activePath: '/repo',
+		activeBranch: 'develop',
+		status: {kind: 'running', message: 'Active: develop'},
+	});
+	const refreshed = Promise.withResolvers<AppModel>();
+	const switched = createModel({
+		rows: [
+			{path: '/repo', shortPath: '.', branch: 'develop', tags: ['main']},
+			{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: ['active']},
+		],
+		activePath: '/repo/.worktree/feat-a',
+		activeBranch: 'feat/a',
+		status: {kind: 'running', message: 'started feat/a'},
+	});
+	const start = vi.fn(async () => switched);
+	const refresh = vi.fn(async () => refreshed.promise);
+	const {lastFrame, stdin} = render(
+		<App
+			initialModel={model}
+			actions={{...makeFakeActions(model), start, refresh}}
+			windowSizeOverride={{columns: 120, rows: 30}}
+		/>,
+	);
+
+	await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1), {timeout: 3000});
+
+	stdin.write('j');
+	await waitForInput();
+	stdin.write('\r');
+	await waitForInput();
+	await waitForInput();
+	await waitForInput();
+
+	expect(start).toHaveBeenCalledWith('/repo/.worktree/feat-a');
+	expect(lastFrame()).toContain('Active: feat/a');
+	refreshed.resolve(model);
+	await waitForInput();
+	await waitForInput();
+	expect(lastFrame()).toContain('Active: feat/a');
+	expect(lastFrame()).not.toContain('Active: develop');
 });

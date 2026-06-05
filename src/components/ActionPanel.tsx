@@ -97,6 +97,14 @@ function formatWorkingTree(selectedRow: AppRow): string {
 	return `dirty (${parts.join(' · ')})`;
 }
 
+function formatUtcDateTime(timestampMs: number | undefined): string {
+	if (timestampMs === undefined || !Number.isFinite(timestampMs)) {
+		return '-';
+	}
+	const iso = new Date(timestampMs).toISOString();
+	return `${iso.slice(0, 10)} ${iso.slice(11, 19)} UTC`;
+}
+
 function formatPullRequest(selectedRow: AppRow): string {
 	if (!selectedRow.pullRequest || selectedRow.pullRequest.kind === 'none') {
 		return 'none';
@@ -227,6 +235,7 @@ function getPanelLines(selectedRow: AppRow | undefined, activePath: string | nul
 		lines.push({text: `Full Path: ${sanitizeInlineText(selectedRow.path)}`});
 	}
 	lines.push({text: `HEAD: ${selectedRow.headSha || '-'}`});
+	lines.push({text: `Branch Created: ${formatUtcDateTime(selectedRow.branchCreatedAtMs)}`});
 
 	if (showTags) {
 		for (const tag of getOrderedTags(selectedRow.tags.filter(tag => tag !== 'active'))) {

@@ -1,4 +1,5 @@
 import {execFile} from 'node:child_process';
+import {stat} from 'node:fs/promises';
 import path from 'node:path';
 import {promisify} from 'node:util';
 
@@ -10,6 +11,7 @@ export interface WorktreeRow {
 	headSha: string;
 	isMain: boolean;
 	isExternal: boolean;
+	createdAtMs: number | null;
 }
 
 function isExternalWorktree(mainWorktreePath: string, worktreePath: string): boolean {
@@ -41,30 +43,49 @@ export function parseWorktreeListPorcelain(input: string, mainWorktreePath: stri
 				headSha: headLine?.slice('HEAD '.length) ?? '',
 				isMain: worktreePath === mainWorktreePath,
 				isExternal: isExternalWorktree(mainWorktreePath, worktreePath),
+				createdAtMs: null,
 			};
 		});
 }
 
-export function sortWorktrees(rows: WorktreeRow[], activePath: string | null): WorktreeRow[] {
+function compareDeterministic(left: WorktreeRow, right: WorktreeRow): number {
+	if (left.isMain !== right.isMain) {
+		return left.isMain ? -1 : 1;
+	}
+
+	const branchCompare = left.branch.localeCompare(right.branch);
+	return branchCompare !== 0 ? branchCompare : left.path.localeCompare(right.path);
+}
+
+export function sortWorktrees(rows: WorktreeRow[], _activePath: string | null): WorktreeRow[] {
+	const hasMissingCreatedAt = rows.some(row => row.createdAtMs === null);
 	return [...rows].sort((left, right) => {
-		if (left.isMain !== right.isMain) {
-			return left.isMain ? -1 : 1;
+		const leftCreated = left.createdAtMs;
+		const rightCreated = right.createdAtMs;
+		if (!hasMissingCreatedAt && leftCreated !== null && rightCreated !== null && leftCreated !== rightCreated) {
+			return leftCreated - rightCreated;
 		}
 
-		const leftActive = activePath !== null && left.path === activePath;
-		const rightActive = activePath !== null && right.path === activePath;
-		if (leftActive !== rightActive) {
-			return leftActive ? -1 : 1;
-		}
-
-		const branchCompare = left.branch.localeCompare(right.branch);
-		return branchCompare !== 0 ? branchCompare : left.path.localeCompare(right.path);
+		return compareDeterministic(left, right);
 	});
+}
+
+async function readWorktreeCreatedAtMs(worktreePath: string): Promise<number | null> {
+	try {
+		const stats = await stat(worktreePath);
+		return stats.birthtimeMs;
+	} catch {
+		return null;
+	}
 }
 
 export async function readWorktrees(cwd: string, mainWorktreePath: string): Promise<WorktreeRow[]> {
 	const {stdout} = await execFileAsync('git', ['worktree', 'list', '--porcelain'], {cwd});
-	return parseWorktreeListPorcelain(stdout, mainWorktreePath);
+	const rows = parseWorktreeListPorcelain(stdout, mainWorktreePath);
+	return Promise.all(rows.map(async row => ({
+		...row,
+		createdAtMs: await readWorktreeCreatedAtMs(row.path),
+	})));
 }
 
 export function toShortPath(mainWorktreePath: string, worktreePath: string): string {

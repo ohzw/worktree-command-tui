@@ -268,6 +268,7 @@ it('keeps rich detail rows on medium split terminals', () => {
 			branch: 'feat/a',
 			tags: ['active'],
 			headSha: '46af3f1c',
+			branchCreatedAtMs: Date.UTC(2026, 5, 5, 12, 34, 56),
 			upstream: {branch: 'origin/develop', ahead: 4, behind: 24},
 			workingTree: {staged: 1, unstaged: 0, untracked: 0, conflicts: 0},
 			pullRequest: {kind: 'found', number: 2125, title: 'Selection pane metadata', url: 'https://github.com/finn-inc/reclaim-the-forest/pull/2125', state: 'OPEN', isDraft: true, baseBranch: 'develop'},
@@ -279,6 +280,7 @@ it('keeps rich detail rows on medium split terminals', () => {
 		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 30}} />,
 	);
 	expect(lastFrame()).toContain('Full Path: /repo/.worktree/feat-a');
+	expect(lastFrame()).toContain('Branch Created: 2026-06-05 12:34:56 UTC');
 	expect(lastFrame()).not.toContain('ACTIVE');
 	expect(lastFrame()).toContain('PR Title: Selection pane metadata');
 
@@ -379,6 +381,9 @@ it('scrolls selection details with SGR mouse wheel in tall split layout', async 
 		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 34}} />,
 	);
 	expect(lastFrame()).not.toContain('Already active. Press s to stop the current session.');
+	stdin.write('\u001B[<65;90;12M');
+	await waitForInput();
+	await waitForInput();
 	stdin.write('\u001B[<65;90;12M');
 	await waitForInput();
 	await waitForInput();

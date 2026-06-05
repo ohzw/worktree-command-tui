@@ -105,6 +105,26 @@ interface GitHubRepository {
 	owner: string;
 	name: string;
 }
+const SCP_REMOTE_URL_RE = /^(?:[^@]+@)?([^:]+):(.+)$/;
+
+interface GitHubPullRequestResponseItem {
+	number?: unknown;
+	title?: unknown;
+	html_url?: unknown;
+	state?: unknown;
+	draft?: unknown;
+	merged_at?: unknown;
+	base?: {ref?: unknown};
+}
+
+interface ParsedPullRequest {
+	number: number;
+	title: string;
+	url: string;
+	state: 'OPEN' | 'CLOSED' | 'MERGED';
+	isDraft: boolean;
+	baseRefName: string;
+}
 
 function shortenSha(headSha: string): string {
 	return headSha.slice(0, SHORT_SHA_LENGTH);
@@ -166,41 +186,46 @@ async function readGitStatusSummary(cwd: string): Promise<GitStatusSummary> {
 	}
 }
 
+function splitRepositoryPath(pathInput: string): string[] {
+	const normalizedPath = pathInput
+		.replace(/\.git$/, '')
+		.replace(/^\/+/, '')
+		.replace(/\/+$/, '')
+		.split('/')
+		.filter(Boolean);
+
+	return normalizedPath;
+}
+
 function parseGitHubRepositoryFromRemoteUrl(remoteUrl: string): GitHubRepository | null {
 	const trimmedUrl = remoteUrl.trim();
 	if (!trimmedUrl) {
 		return null;
 	}
 
-	try {
-		let host: string;
-		let repoPath: string;
-		if (trimmedUrl.includes('://')) {
-			const parsedUrl = new URL(trimmedUrl);
-			host = parsedUrl.hostname.toLowerCase();
-			repoPath = parsedUrl.pathname;
-		} else {
-			const scpMatch = /^(?:[^@]+@)?([^:]+):(.+)$/.exec(trimmedUrl);
-			if (!scpMatch) {
-				return null;
-			}
-			host = scpMatch[1]!.toLowerCase();
-			repoPath = scpMatch[2]!;
+	if (trimmedUrl.includes('://')) {
+		if (!URL.canParse(trimmedUrl)) {
+			return null;
 		}
-
-		const segments = repoPath
-			.replace(/\.git$/, '')
-			.replace(/^\/+/, '')
-			.replace(/\/+$/, '')
-			.split('/')
-			.filter(Boolean);
+		const parsedUrl = new URL(trimmedUrl);
+		const segments = splitRepositoryPath(parsedUrl.pathname);
 		if (segments.length < 2) {
 			return null;
 		}
-		return {host, owner: segments[0]!, name: segments[1]!};
-	} catch {
+		return {host: parsedUrl.hostname.toLowerCase(), owner: segments[0]!, name: segments[1]!};
+	}
+
+	const scpMatch = SCP_REMOTE_URL_RE.exec(trimmedUrl);
+	if (!scpMatch) {
 		return null;
 	}
+
+	const segments = splitRepositoryPath(scpMatch[2]!);
+	if (segments.length < 2) {
+		return null;
+	}
+
+	return {host: scpMatch[1]!.toLowerCase(), owner: segments[0]!, name: segments[1]!};
 }
 
 async function readGitHubRepository(cwd: string): Promise<GitHubRepository> {
@@ -213,19 +238,11 @@ async function readGitHubRepository(cwd: string): Promise<GitHubRepository> {
 }
 
 
-async function readPullRequestList(
-	cwd: string,
+function buildPullRequestListArgs(
+	repository: GitHubRepository,
 	branch: string,
 	state: 'all' | 'open',
-): Promise<Array<{
-	number: number;
-	title: string;
-	url: string;
-	state: 'OPEN' | 'CLOSED' | 'MERGED';
-	isDraft: boolean;
-	baseRefName: string;
-}>> {
-	const repository = await readGitHubRepository(cwd);
+): string[] {
 	const args = [
 		'api',
 		'-X',
@@ -238,59 +255,73 @@ async function readPullRequestList(
 		'-F',
 		'per_page=1',
 	];
+
 	if (repository.host !== 'github.com' && repository.host !== 'www.github.com') {
 		args.push('--hostname', repository.host);
 	}
 
+	return args;
+}
+
+function normalizePullRequestState(
+	state: unknown,
+	mergedAt: unknown,
+): 'OPEN' | 'CLOSED' | 'MERGED' {
+	if (typeof state === 'string' && state.toUpperCase() === 'OPEN') {
+		return 'OPEN';
+	}
+
+	return typeof mergedAt === 'string' && mergedAt.length > 0 ? 'MERGED' : 'CLOSED';
+}
+
+function parsePullRequest(item: unknown): ParsedPullRequest | null {
+	if (typeof item !== 'object' || item === null) {
+		return null;
+	}
+
+	const pullRequest = item as GitHubPullRequestResponseItem;
+	const number = typeof pullRequest.number === 'number' ? pullRequest.number : NaN;
+	const title = typeof pullRequest.title === 'string' ? pullRequest.title : '';
+	const url = typeof pullRequest.html_url === 'string' ? pullRequest.html_url : '';
+	const isDraft = typeof pullRequest.draft === 'boolean' ? pullRequest.draft : false;
+	const baseRefName = typeof pullRequest.base?.ref === 'string' ? pullRequest.base.ref : '';
+
+	if (!Number.isFinite(number) || !title || !url || !baseRefName) {
+		return null;
+	}
+
+	return {
+		number,
+		title,
+		url,
+		state: normalizePullRequestState(pullRequest.state, pullRequest.merged_at),
+		isDraft,
+		baseRefName,
+	};
+}
+
+async function readPullRequestList(
+	cwd: string,
+	branch: string,
+	state: 'all' | 'open',
+): Promise<ParsedPullRequest[]> {
+	const repository = await readGitHubRepository(cwd);
+	const args = buildPullRequestListArgs(repository, branch, state);
 	const {stdout} = await execFileAsync('gh', args, {cwd, timeout: GH_TIMEOUT_MS});
 	const payload = JSON.parse(stdout) as unknown;
 	if (!Array.isArray(payload)) {
 		throw new Error('GitHub REST API returned unexpected payload');
 	}
 
-	return payload.map(item => {
-		if (typeof item !== 'object' || item === null) {
-			return null;
+	const pullRequests: ParsedPullRequest[] = [];
+	for (const item of payload) {
+		const parsed = parsePullRequest(item);
+		if (parsed !== null) {
+			pullRequests.push(parsed);
 		}
-		const pr = item as {
-			number?: unknown;
-			title?: unknown;
-			html_url?: unknown;
-			state?: unknown;
-			draft?: unknown;
-			merged_at?: unknown;
-			base?: {ref?: unknown};
-		};
-		const number = typeof pr.number === 'number' ? pr.number : NaN;
-		const title = typeof pr.title === 'string' ? pr.title : '';
-		const url = typeof pr.html_url === 'string' ? pr.html_url : '';
-		const isDraft = typeof pr.draft === 'boolean' ? pr.draft : false;
-		const baseRefName = typeof pr.base?.ref === 'string' ? pr.base.ref : '';
-		const mergedAt = typeof pr.merged_at === 'string' ? pr.merged_at : null;
-		const normalizedState = typeof pr.state === 'string' && pr.state.toUpperCase() === 'OPEN'
-			? 'OPEN'
-			: mergedAt ? 'MERGED' : 'CLOSED';
+	}
 
-		if (!Number.isFinite(number) || !title || !url || !baseRefName) {
-			return null;
-		}
-
-		return {
-			number,
-			title,
-			url,
-			state: normalizedState,
-			isDraft,
-			baseRefName,
-		};
-	}).filter((item): item is {
-		number: number;
-		title: string;
-		url: string;
-		state: 'OPEN' | 'CLOSED' | 'MERGED';
-		isDraft: boolean;
-		baseRefName: string;
-	} => item !== null);
+	return pullRequests;
 }
 async function readPullRequestInfo(cwd: string, branch: string): Promise<PullRequestInfo> {
 	if (branch.startsWith('(')) {
@@ -299,19 +330,21 @@ async function readPullRequestInfo(cwd: string, branch: string): Promise<PullReq
 
 	try {
 		const openPullRequests = await readPullRequestList(cwd, branch, 'open');
-		const parsed = openPullRequests.length > 0 ? openPullRequests : await readPullRequestList(cwd, branch, 'all');
-		const pr = parsed[0];
-		if (!pr) {
+		const pullRequests = openPullRequests.length > 0
+			? openPullRequests
+			: await readPullRequestList(cwd, branch, 'all');
+		const pullRequest = pullRequests[0];
+		if (!pullRequest) {
 			return {kind: 'none'};
 		}
 		return {
 			kind: 'found',
-			number: pr.number,
-			title: pr.title,
-			url: pr.url,
-			state: pr.state,
-			isDraft: pr.isDraft,
-			baseBranch: pr.baseRefName,
+			number: pullRequest.number,
+			title: pullRequest.title,
+			url: pullRequest.url,
+			state: pullRequest.state,
+			isDraft: pullRequest.isDraft,
+			baseBranch: pullRequest.baseRefName,
 		};
 	} catch {
 		return {kind: 'unavailable'};

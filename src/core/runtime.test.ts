@@ -4,6 +4,43 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {describe, expect, it, vi} from 'vitest';
 import {buildActions, parseGitStatusSummary, toAppRow} from './runtime.js';
+const TEST_GITHUB_OWNER = 'finn-inc';
+const TEST_GITHUB_REPOSITORY = 'reclaim-the-forest';
+const TEST_GITHUB_REMOTE_URL = `https://github.com/${TEST_GITHUB_OWNER}/${TEST_GITHUB_REPOSITORY}.git`;
+const TEST_MERGED_PR_RESPONSE = JSON.stringify([{
+	number: 2001,
+	title: 'Already merged',
+	html_url: 'https://github.com/finn-inc/reclaim-the-forest/pull/2001',
+	state: 'closed',
+	draft: false,
+	merged_at: '2026-05-31T00:00:00Z',
+	base: {ref: 'develop'},
+}]);
+
+function buildGhPullRequestArgs(branch: string, state: 'all' | 'open'): string {
+	return `api -X GET repos/${TEST_GITHUB_OWNER}/${TEST_GITHUB_REPOSITORY}/pulls -f state=${state} -f head=${TEST_GITHUB_OWNER}:${branch} -F per_page=1`;
+}
+
+function writeMockGhBinary(
+	ghPath: string,
+	callsPath: string,
+	openArgs: string,
+	allArgs: string,
+): void {
+	writeFileSync(ghPath, `#!/bin/sh
+printf '%s\\n' "$*" >> ${JSON.stringify(callsPath)}
+if [ "$*" = ${JSON.stringify(openArgs)} ]; then
+	printf '[]'
+	exit 0
+fi
+if [ "$*" = ${JSON.stringify(allArgs)} ]; then
+	printf ${JSON.stringify(TEST_MERGED_PR_RESPONSE)}
+	exit 0
+fi
+exit 2
+`);
+	chmodSync(ghPath, 0o755);
+}
 
 
 function initGitRepo(root: string): void {
@@ -17,7 +54,7 @@ function initGitRepo(root: string): void {
 
 function writeRepoConfigAndPackage(root: string, namespace: string): void {
 	writeFileSync(path.join(root, 'package.json'), '{}');
-	execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/finn-inc/reclaim-the-forest.git'], {cwd: root});
+	execFileSync('git', ['remote', 'add', 'origin', TEST_GITHUB_REMOTE_URL], {cwd: root});
 	writeFileSync(path.join(root, '.worktree-command-tui.jsonc'), JSON.stringify({
 		namespace,
 		command: ['node', '-e', 'console.log("ready")'],
@@ -128,21 +165,9 @@ describe('pull request metadata', () => {
 		mkdirSync(binDir);
 		const callsPath = path.join(root, 'gh-calls.log');
 		const ghPath = path.join(binDir, 'gh');
-		const openArgs = `api -X GET repos/finn-inc/reclaim-the-forest/pulls -f state=open -f head=finn-inc:${branch} -F per_page=1`;
-		const allArgs = `api -X GET repos/finn-inc/reclaim-the-forest/pulls -f state=all -f head=finn-inc:${branch} -F per_page=1`;
-		writeFileSync(ghPath, `#!/bin/sh
-printf '%s\\n' "$*" >> ${JSON.stringify(callsPath)}
-if [ "$*" = ${JSON.stringify(openArgs)} ]; then
-	printf '[]'
-	exit 0
-fi
-if [ "$*" = ${JSON.stringify(allArgs)} ]; then
-	printf '[{"number":2001,"title":"Already merged","html_url":"https://github.com/finn-inc/reclaim-the-forest/pull/2001","state":"closed","draft":false,"merged_at":"2026-05-31T00:00:00Z","base":{"ref":"develop"}}]'
-	exit 0
-fi
-exit 2
-`);
-		chmodSync(ghPath, 0o755);
+		const openArgs = buildGhPullRequestArgs(branch, 'open');
+		const allArgs = buildGhPullRequestArgs(branch, 'all');
+		writeMockGhBinary(ghPath, callsPath, openArgs, allArgs);
 		const previousPath = process.env.PATH;
 		process.env.PATH = `${binDir}${path.delimiter}${previousPath ?? ''}`;
 
@@ -160,9 +185,10 @@ exit 2
 				baseBranch: 'develop',
 			});
 			const calls = readFileSync(callsPath, 'utf8').trim().split('\n');
+			const callLog = calls.join('\n');
 			expect(calls).toEqual([openArgs, allArgs]);
-			expect(calls.join('\n')).not.toContain('graphql');
-			expect(calls.join('\n')).not.toContain('pr list');
+			expect(callLog).not.toContain('graphql');
+			expect(callLog).not.toContain('pr list');
 		} finally {
 			if (previousPath === undefined) {
 				delete process.env.PATH;
@@ -173,30 +199,29 @@ exit 2
 	});
 });
 
-	it('keeps running status after setup when a session is active', async () => {
-		const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'wctui-runtime-active-')));
-		initGitRepo(root);
-		writeFileSync(path.join(root, 'package.json'), '{}');
-		writeFileSync(path.join(root, '.worktree-command-tui.jsonc'), JSON.stringify({
-			namespace: 'runtime-active',
-			command: ['node', '-e', 'setInterval(() => {}, 1000)'],
-			setupCommand: ['node', '-e', 'console.log("setup while active")'],
-			port: 31236,
-			requiredFiles: ['package.json'],
-			orphanMatchers: [],
-		}));
+it('keeps running status after setup when a session is active', async () => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'wctui-runtime-active-')));
+	initGitRepo(root);
+	writeFileSync(path.join(root, 'package.json'), '{}');
+	writeFileSync(path.join(root, '.worktree-command-tui.jsonc'), JSON.stringify({
+		namespace: 'runtime-active',
+		command: ['node', '-e', 'setInterval(() => {}, 1000)'],
+		setupCommand: ['node', '-e', 'console.log("setup while active")'],
+		port: 31236,
+		requiredFiles: ['package.json'],
+		orphanMatchers: [],
+	}));
 
-		const actions = await buildActions(root);
-		await actions.start(root);
-		const model = await actions.setup(root);
-		await actions.stop();
+	const actions = await buildActions(root);
+	await actions.start(root);
+	const model = await actions.setup(root);
+	await actions.stop();
 
-		expect(model.activePath).toBe(root);
-		expect(model.status.kind).toBe('running');
-		expect(model.status.message).toMatch(/^setup complete for /u);
-		expect(model.logs[0]?.content).toContain('setup while active');
-	});
-
+	expect(model.activePath).toBe(root);
+	expect(model.status.kind).toBe('running');
+	expect(model.status.message).toMatch(/^setup complete for /u);
+	expect(model.logs[0]?.content).toContain('setup while active');
+});
 describe('toAppRow', () => {
 	it('preserves collected metadata in the rendered row', () => {
 		const row = toAppRow(

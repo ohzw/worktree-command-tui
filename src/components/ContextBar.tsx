@@ -21,9 +21,35 @@ const KIND_TO_COLOR = {
 	error: 'red',
 } as const;
 
+
+interface KeyHint {
+	binding: string;
+	label: string;
+}
+
+function buildKeyHints(setupAvailable: boolean): KeyHint[] {
+	const hints: KeyHint[] = [
+		{binding: '↑↓/jk', label: 'Move'},
+		{binding: 'Enter', label: 'Switch'},
+	];
+	if (setupAvailable) {
+		hints.push({binding: 'i', label: 'Setup'});
+	}
+
+	hints.push(
+		{binding: 'L', label: 'Logs'},
+		{binding: 's', label: 'Stop'},
+		{binding: 'r', label: 'Refresh'},
+		{binding: '?', label: 'Help'},
+		{binding: 'q', label: 'Quit'},
+	);
+
+	return hints;
+}
+
 export function ContextBar({status, setupAvailable}: {status: AppStatus; setupAvailable: boolean}) {
 	const isBusy = status.kind === 'setting-up' || status.kind === 'starting' || status.kind === 'stopping';
-	const setupHelp = setupAvailable ? '  i setup' : '';
+	const keyHints = buildKeyHints(setupAvailable);
 
 	return (
 		<Box borderStyle="round" borderColor={KIND_TO_COLOR[status.kind]} flexDirection="column" paddingX={1}>
@@ -34,8 +60,14 @@ export function ContextBar({status, setupAvailable}: {status: AppStatus; setupAv
 					{KIND_TO_ICON[status.kind]} Status: {status.kind} — {status.message}
 				</Text>
 			)}
-			<Text dimColor wrap="truncate-end">
-				Keys: ↑↓/jk move  g/G first/last  Wheel/PgUp/PgDn list & selection scroll  [/] log scroll  L full-screen logs  Enter start/switch{setupHelp}  s stop  r refresh  q quit
+			<Text wrap="truncate-end">
+				{keyHints.map((hint, hintIndex) => (
+					<React.Fragment key={hint.binding}>
+						{hintIndex === 0 ? null : <Text dimColor> | </Text>}
+						<Text color="white">{hint.binding}</Text>
+						<Text dimColor> {hint.label}</Text>
+					</React.Fragment>
+				))}
 			</Text>
 		</Box>
 	);

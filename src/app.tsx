@@ -4,6 +4,7 @@ import {Box, Text, useApp, useInput, useStdin, useStdout, useWindowSize} from 'i
 import {ActionPanel} from './components/ActionPanel.js';
 import {ContextBar} from './components/ContextBar.js';
 import {Header} from './components/Header.js';
+import {HelpWindow} from './components/HelpWindow.js';
 import {FloatingLogWindow} from './components/FloatingLogWindow.js';
 import {LogPanel, buildLogLines} from './components/LogPanel.js';
 import {WorktreeList} from './components/WorktreeList.js';
@@ -116,6 +117,7 @@ export function App({
 	const [worktreeScrollOffset, setWorktreeScrollOffset] = useState(0);
 	const [logScrollOffset, setLogScrollOffset] = useState(0);
 	const [isLogOverlayOpen, setIsLogOverlayOpen] = useState(false);
+	const [isHelpOverlayOpen, setIsHelpOverlayOpen] = useState(false);
 	const [completedAlert, setCompletedAlert] = useState<string | null>(null);
 	const userActionInFlightRef = useRef(false);
 	const backgroundRefreshInFlightRef = useRef(false);
@@ -274,7 +276,17 @@ export function App({
 	}
 
 	useInput((input, key) => {
+		if (isHelpOverlayOpen) {
+			if (key.escape || input === '\u001B' || input === 'q' || input === '?') {
+				setIsHelpOverlayOpen(false);
+			}
+			return;
+		}
 		if (isLogOverlayOpen) {
+			if (input === '?') {
+				setIsHelpOverlayOpen(true);
+				return;
+			}
 			if (key.escape || input === 'q' || input === 'L') {
 				setIsLogOverlayOpen(false);
 				return;
@@ -323,6 +335,10 @@ export function App({
 		}
 		if (input === 'G') {
 			moveSelection(model.rows.length - 1);
+			return;
+		}
+		if (input === '?') {
+			setIsHelpOverlayOpen(true);
 			return;
 		}
 		if (input === 'L') {
@@ -396,6 +412,10 @@ export function App({
 
 	useEffect(() => {
 		const onData = (data: Buffer | string) => {
+			if (isHelpOverlayOpen) {
+				return;
+			}
+
 			const events = parseMouseWheelEvents(typeof data === 'string' ? data : data.toString('utf8'));
 			for (const event of events) {
 				if (isLogOverlayOpen) {
@@ -455,7 +475,7 @@ export function App({
 				stdout.write(DISABLE_MOUSE_TRACKING);
 			}
 		};
-	}, [stdin, stdout, listWidth, stackedLayout, listPaneViewportHeight, mouseWheelLineStep, model.rows.length, showLogPanel, logPaneTop, logPaneBottom, maxLogScrollOffset, worktreePaneRight, selectionPaneLeft, bodyPaneTop, bodyPaneBottom, isLogOverlayOpen]);
+	}, [stdin, stdout, listWidth, stackedLayout, listPaneViewportHeight, mouseWheelLineStep, model.rows.length, showLogPanel, logPaneTop, logPaneBottom, maxLogScrollOffset, worktreePaneRight, selectionPaneLeft, bodyPaneTop, bodyPaneBottom, isLogOverlayOpen, isHelpOverlayOpen]);
 
 	useEffect(() => {
 		if (listPaneViewportHeight === undefined) {
@@ -481,6 +501,16 @@ export function App({
 		}
 		setLogScrollOffset(current => Math.min(current, maxLogScrollOffset));
 	}, [showLogPanel, isLogOverlayOpen, maxLogScrollOffset]);
+
+	if (isHelpOverlayOpen) {
+		return (
+			<HelpWindow
+				setupAvailable={model.setupAvailable}
+				width={Math.max(1, rootWidth - 1)}
+				height={rootHeight}
+			/>
+		);
+	}
 
 	if (isLogOverlayOpen) {
 		return (

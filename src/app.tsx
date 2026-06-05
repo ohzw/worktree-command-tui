@@ -211,10 +211,11 @@ export function App({
 	const compactDetailPane = !stackedLayout && rootHeight <= 30 && model.rows.length > 1;
 	const showLogPanel = !stackedLayout && rootHeight >= 34;
 	const logPaneHeight = showLogPanel ? getLogPaneHeight(rootHeight) : 0;
+	const stackedPaneHeight = Math.max(3, Math.floor((rootHeight - 11) / 2));
 	const paneHeight = stackedLayout
-		? undefined
+		? stackedPaneHeight
 		: Math.max(3, rootHeight - 11 - logPaneHeight);
-	const selectionScrollPageSize = Math.max(1, Math.floor((paneHeight ?? rootHeight) / 2));
+	const selectionScrollPageSize = Math.max(1, Math.floor(paneHeight / 2));
 	const logLineCount = useMemo(() => buildLogLines(model.logs).length, [model.logs]);
 	const logViewportHeight = isLogOverlayOpen
 		? Math.max(1, rootHeight - 3)

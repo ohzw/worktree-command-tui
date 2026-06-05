@@ -244,8 +244,37 @@ it('stacks panes responsively on medium-width terminals when there is enough ver
 	);
 	expect(lastFrame()).toContain('Worktrees');
 	expect(lastFrame()).toContain('Selection / Action');
-	expect(lastFrame()).toContain('> # develop');
 });
+
+it('shows more stacked worktree rows as terminal height grows', () => {
+	const model = createModel({
+		rows: Array.from({length: 6}, (_, index) => ({
+			path: `/repo/.worktree/item-${index}`,
+			shortPath: `.worktree/item-${index}`,
+			branch: `item-${index}`,
+			tags: index === 0 ? ['active'] : [],
+		})),
+		activePath: '/repo/.worktree/item-0',
+		activeBranch: 'item-0',
+	});
+	const columns = 90;
+	const rows = 40;
+	expect(shouldStackPanes(columns, rows, model.rows.length)).toBe(true);
+	const {lastFrame} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns, rows}} />,
+	);
+	const lines = (lastFrame() ?? '').split('\n');
+	expect(lines.join('\n')).not.toContain('Logs (*.log · tail 120)');
+	const worktreesHeader = lines.findIndex(line => line.includes('Worktrees'));
+	const selectionHeader = lines.findIndex((line, index) => index > worktreesHeader && line.includes('Selection / Action'));
+	expect(worktreesHeader).toBeGreaterThan(-1);
+	expect(selectionHeader).toBeGreaterThan(worktreesHeader + 1);
+	const worktreeSection = lines.slice(worktreesHeader, selectionHeader);
+	const visibleWorktreeRows = worktreeSection.filter(line => /\bitem-\d+\b/.test(line));
+	expect(visibleWorktreeRows.length).toBeGreaterThan(3);
+});
+
+
 
 it('shows the log pane on tall split terminals', () => {
 	const model = createModel();

@@ -47,12 +47,19 @@ export interface AppModel {
 	logs: AppLogEntry[];
 }
 
+export interface AppLogRefresh {
+	logs: AppLogEntry[];
+	activePath: string | null;
+	activeBranch: string | null;
+}
+
+
 export interface AppActions {
 	setup: (worktreePath: string) => Promise<AppModel>;
 	start: (worktreePath: string) => Promise<AppModel>;
 	stop: () => Promise<AppModel>;
 	refresh: () => Promise<AppModel>;
-	refreshLogs: () => Promise<AppLogEntry[]>;
+	refreshLogs: () => Promise<AppLogRefresh>;
 }
 
 

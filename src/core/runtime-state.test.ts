@@ -149,7 +149,7 @@ describe('createRuntimeStateActions', () => {
 		const result = await actions.refreshLogs();
 
 		expect(adapter.readLogs).toHaveBeenCalledWith(activeRecord.logPath);
-		expect(result).toBe(logs);
+		expect(result).toEqual({logs, activePath: activeRecord.worktreePath, activeBranch: activeRecord.branch});
 	});
 
 	it('refreshes logs with no active log path when idle', async () => {
@@ -162,7 +162,7 @@ describe('createRuntimeStateActions', () => {
 		const result = await actions.refreshLogs();
 
 		expect(adapter.readLogs).toHaveBeenCalledWith(null);
-		expect(result).toBe(logs);
+		expect(result).toEqual({logs, activePath: null, activeBranch: null});
 	});
 
 	it('returns setup success status and setup logs', async () => {

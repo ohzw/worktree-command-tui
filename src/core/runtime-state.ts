@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type {ToolConfig} from './config.js';
-import type {AppActions, AppLogEntry, AppModel} from './runtime.js';
+import type {AppActions, AppLogEntry, AppLogRefresh, AppModel} from './runtime.js';
 import type {SessionPaths, SessionRecord} from './session-store.js';
 
 export interface StartedCommand {
@@ -34,9 +34,13 @@ function toLogFileBase(branch: string): string {
 }
 
 export function createRuntimeStateActions({config, paths, adapter}: RuntimeStateOptions): AppActions {
-	const refreshLogs = async (): Promise<AppLogEntry[]> => {
+	const refreshLogs = async (): Promise<AppLogRefresh> => {
 		const active = await adapter.readActive();
-		return adapter.readLogs(active?.logPath ?? null);
+		return {
+			logs: await adapter.readLogs(active?.logPath ?? null),
+			activePath: active?.worktreePath ?? null,
+			activeBranch: active?.branch ?? null,
+		};
 	};
 
 	const stop = async (): Promise<AppModel> => {

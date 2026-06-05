@@ -7,6 +7,7 @@ export const CONFIG_FILE_NAMES = [CONFIG_FILE_NAME, LEGACY_CONFIG_FILE_NAME] as 
 export interface ToolConfig {
 	namespace: string;
 	command: string[];
+	setupCommand?: string[];
 	port: number;
 	requiredFiles: string[];
 	orphanMatchers: string[];
@@ -26,6 +27,16 @@ function readStringList(value: unknown, fieldName: string): string[] {
 	}
 	if (!Array.isArray(value) || value.some(item => !isNonEmptyString(item))) {
 		throw new Error(`${fieldName} must be a string array`);
+	}
+	return value;
+}
+
+function readOptionalCommand(value: unknown, fieldName: string): string[] | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (!Array.isArray(value) || value.length === 0 || value.some(part => !isNonEmptyString(part))) {
+		throw new Error(`${fieldName} must be a non-empty string array when set`);
 	}
 	return value;
 }
@@ -174,6 +185,7 @@ export async function loadToolConfig({repoRoot}: {repoRoot: string}): Promise<To
 	return {
 		namespace: raw.namespace,
 		command: raw.command,
+		setupCommand: readOptionalCommand(raw.setupCommand, 'setupCommand'),
 		port: raw.port,
 		requiredFiles: readStringList(raw.requiredFiles, 'requiredFiles'),
 		orphanMatchers: readStringList(raw.orphanMatchers, 'orphanMatchers'),

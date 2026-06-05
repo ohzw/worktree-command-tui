@@ -1,5 +1,5 @@
 import {execFileSync} from 'node:child_process';
-import {existsSync, mkdtempSync, realpathSync, writeFileSync} from 'node:fs';
+import {chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {describe, expect, it, vi} from 'vitest';
@@ -14,6 +14,19 @@ function initGitRepo(root: string): void {
 	execFileSync('git', ['add', 'README.md'], {cwd: root});
 	execFileSync('git', ['commit', '-m', 'initial'], {cwd: root});
 }
+
+function writeRepoConfigAndPackage(root: string, namespace: string): void {
+	writeFileSync(path.join(root, 'package.json'), '{}');
+	execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/finn-inc/reclaim-the-forest.git'], {cwd: root});
+	writeFileSync(path.join(root, '.worktree-command-tui.jsonc'), JSON.stringify({
+		namespace,
+		command: ['node', '-e', 'console.log("ready")'],
+		port: 31237,
+		requiredFiles: ['package.json'],
+		orphanMatchers: [],
+	}));
+}
+
 describe('parseGitStatusSummary', () => {
 	it('parses upstream, ahead/behind counts, and worktree dirtiness', () => {
 		const summary = parseGitStatusSummary(`
@@ -102,6 +115,61 @@ describe('buildActions setup command', () => {
 
 		expect(typeof model.rows[0]?.branchCreatedAtMs).toBe('number');
 		expect(Number.isFinite(model.rows[0]?.branchCreatedAtMs)).toBe(true);
+	});
+});
+
+describe('pull request metadata', () => {
+	it('uses gh api REST requests instead of gh pr list GraphQL requests', async () => {
+		const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'wctui-runtime-gh-api-pr-')));
+		initGitRepo(root);
+		writeRepoConfigAndPackage(root, 'runtime-gh-api-pr');
+		const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {cwd: root, encoding: 'utf8'}).trim();
+		const binDir = path.join(root, 'bin');
+		mkdirSync(binDir);
+		const callsPath = path.join(root, 'gh-calls.log');
+		const ghPath = path.join(binDir, 'gh');
+		const openArgs = `api -X GET repos/finn-inc/reclaim-the-forest/pulls -f state=open -f head=finn-inc:${branch} -F per_page=1`;
+		const allArgs = `api -X GET repos/finn-inc/reclaim-the-forest/pulls -f state=all -f head=finn-inc:${branch} -F per_page=1`;
+		writeFileSync(ghPath, `#!/bin/sh
+printf '%s\\n' "$*" >> ${JSON.stringify(callsPath)}
+if [ "$*" = ${JSON.stringify(openArgs)} ]; then
+	printf '[]'
+	exit 0
+fi
+if [ "$*" = ${JSON.stringify(allArgs)} ]; then
+	printf '[{"number":2001,"title":"Already merged","html_url":"https://github.com/finn-inc/reclaim-the-forest/pull/2001","state":"closed","draft":false,"merged_at":"2026-05-31T00:00:00Z","base":{"ref":"develop"}}]'
+	exit 0
+fi
+exit 2
+`);
+		chmodSync(ghPath, 0o755);
+		const previousPath = process.env.PATH;
+		process.env.PATH = `${binDir}${path.delimiter}${previousPath ?? ''}`;
+
+		try {
+			const actions = await buildActions(root);
+			const model = await actions.refresh();
+
+			expect(model.rows[0]?.pullRequest).toEqual({
+				kind: 'found',
+				number: 2001,
+				title: 'Already merged',
+				url: 'https://github.com/finn-inc/reclaim-the-forest/pull/2001',
+				state: 'MERGED',
+				isDraft: false,
+				baseBranch: 'develop',
+			});
+			const calls = readFileSync(callsPath, 'utf8').trim().split('\n');
+			expect(calls).toEqual([openArgs, allArgs]);
+			expect(calls.join('\n')).not.toContain('graphql');
+			expect(calls.join('\n')).not.toContain('pr list');
+		} finally {
+			if (previousPath === undefined) {
+				delete process.env.PATH;
+			} else {
+				process.env.PATH = previousPath;
+			}
+		}
 	});
 });
 

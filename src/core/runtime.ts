@@ -100,6 +100,12 @@ interface GitStatusSummary {
 	workingTree?: WorkingTreeInfo;
 }
 
+interface GitHubRepository {
+	host: string;
+	owner: string;
+	name: string;
+}
+
 function shortenSha(headSha: string): string {
 	return headSha.slice(0, SHORT_SHA_LENGTH);
 }
@@ -160,6 +166,53 @@ async function readGitStatusSummary(cwd: string): Promise<GitStatusSummary> {
 	}
 }
 
+function parseGitHubRepositoryFromRemoteUrl(remoteUrl: string): GitHubRepository | null {
+	const trimmedUrl = remoteUrl.trim();
+	if (!trimmedUrl) {
+		return null;
+	}
+
+	try {
+		let host: string;
+		let repoPath: string;
+		if (trimmedUrl.includes('://')) {
+			const parsedUrl = new URL(trimmedUrl);
+			host = parsedUrl.hostname.toLowerCase();
+			repoPath = parsedUrl.pathname;
+		} else {
+			const scpMatch = /^(?:[^@]+@)?([^:]+):(.+)$/.exec(trimmedUrl);
+			if (!scpMatch) {
+				return null;
+			}
+			host = scpMatch[1]!.toLowerCase();
+			repoPath = scpMatch[2]!;
+		}
+
+		const segments = repoPath
+			.replace(/\.git$/, '')
+			.replace(/^\/+/, '')
+			.replace(/\/+$/, '')
+			.split('/')
+			.filter(Boolean);
+		if (segments.length < 2) {
+			return null;
+		}
+		return {host, owner: segments[0]!, name: segments[1]!};
+	} catch {
+		return null;
+	}
+}
+
+async function readGitHubRepository(cwd: string): Promise<GitHubRepository> {
+	const {stdout} = await execFileAsync('git', ['config', '--get', 'remote.origin.url'], {cwd});
+	const repository = parseGitHubRepositoryFromRemoteUrl(stdout);
+	if (!repository) {
+		throw new Error('GitHub repository remote unavailable');
+	}
+	return repository;
+}
+
+
 async function readPullRequestList(
 	cwd: string,
 	branch: string,
@@ -172,30 +225,72 @@ async function readPullRequestList(
 	isDraft: boolean;
 	baseRefName: string;
 }>> {
-	const {stdout} = await execFileAsync(
-		'gh',
-		[
-			'pr',
-			'list',
-			'--head',
-			branch,
-			'--state',
-			state,
-			'--limit',
-			'1',
-			'--json',
-			'number,title,url,state,isDraft,baseRefName',
-		],
-		{cwd, timeout: GH_TIMEOUT_MS},
-	);
-	return JSON.parse(stdout) as Array<{
+	const repository = await readGitHubRepository(cwd);
+	const args = [
+		'api',
+		'-X',
+		'GET',
+		`repos/${repository.owner}/${repository.name}/pulls`,
+		'-f',
+		`state=${state}`,
+		'-f',
+		`head=${repository.owner}:${branch}`,
+		'-F',
+		'per_page=1',
+	];
+	if (repository.host !== 'github.com' && repository.host !== 'www.github.com') {
+		args.push('--hostname', repository.host);
+	}
+
+	const {stdout} = await execFileAsync('gh', args, {cwd, timeout: GH_TIMEOUT_MS});
+	const payload = JSON.parse(stdout) as unknown;
+	if (!Array.isArray(payload)) {
+		throw new Error('GitHub REST API returned unexpected payload');
+	}
+
+	return payload.map(item => {
+		if (typeof item !== 'object' || item === null) {
+			return null;
+		}
+		const pr = item as {
+			number?: unknown;
+			title?: unknown;
+			html_url?: unknown;
+			state?: unknown;
+			draft?: unknown;
+			merged_at?: unknown;
+			base?: {ref?: unknown};
+		};
+		const number = typeof pr.number === 'number' ? pr.number : NaN;
+		const title = typeof pr.title === 'string' ? pr.title : '';
+		const url = typeof pr.html_url === 'string' ? pr.html_url : '';
+		const isDraft = typeof pr.draft === 'boolean' ? pr.draft : false;
+		const baseRefName = typeof pr.base?.ref === 'string' ? pr.base.ref : '';
+		const mergedAt = typeof pr.merged_at === 'string' ? pr.merged_at : null;
+		const normalizedState = typeof pr.state === 'string' && pr.state.toUpperCase() === 'OPEN'
+			? 'OPEN'
+			: mergedAt ? 'MERGED' : 'CLOSED';
+
+		if (!Number.isFinite(number) || !title || !url || !baseRefName) {
+			return null;
+		}
+
+		return {
+			number,
+			title,
+			url,
+			state: normalizedState,
+			isDraft,
+			baseRefName,
+		};
+	}).filter((item): item is {
 		number: number;
 		title: string;
 		url: string;
 		state: 'OPEN' | 'CLOSED' | 'MERGED';
 		isDraft: boolean;
 		baseRefName: string;
-	}>;
+	} => item !== null);
 }
 async function readPullRequestInfo(cwd: string, branch: string): Promise<PullRequestInfo> {
 	if (branch.startsWith('(')) {

@@ -2,6 +2,14 @@ import {closeSync, mkdirSync, openSync} from 'node:fs';
 import {spawn} from 'node:child_process';
 import path from 'node:path';
 
+function getLogEnvironment(): NodeJS.ProcessEnv {
+	return {
+		...process.env,
+		FORCE_COLOR: process.env.FORCE_COLOR ?? '1',
+		CLICOLOR_FORCE: process.env.CLICOLOR_FORCE ?? '1',
+	};
+}
+
 interface CommandLogOptions {
 	command: string[];
 	cwd: string;
@@ -33,6 +41,7 @@ export function runCommandToLog({
 
 	const child = spawn(command[0]!, command.slice(1), {
 		cwd,
+		env: getLogEnvironment(),
 		stdio: ['ignore', fd, fd],
 	});
 
@@ -76,6 +85,7 @@ export function startDetachedCommand({
 	const child = spawn(command[0]!, command.slice(1), {
 		cwd,
 		detached: true,
+		env: getLogEnvironment(),
 		stdio: ['ignore', fd, fd],
 	});
 

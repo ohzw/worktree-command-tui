@@ -1,7 +1,36 @@
 import {Box, Text} from 'ink';
 import type {AppRow} from '../core/runtime.js';
+import {
+	getOrderedNonActiveTags,
+	projectAction,
+	projectNote,
+	projectPullRequest,
+	projectUpstream,
+	projectWorkingTree,
+	sanitizeInlineText,
+	type ProjectionSeverity,
+	type PullRequestProjection,
+	type TagProjection,
+	type WorkingTreePartKind,
+} from '../core/worktree-projection.js';
+import {getScrollbarThumbRows, sliceListViewport} from '../terminal/viewport.js';
 
-function getTagColor(tag: string): 'green' | 'yellow' | 'blue' | 'red' | 'magenta' {
+export function getActionVariant(selectedRow: AppRow, activePath: string | null): ProjectionSeverity {
+	return projectAction(selectedRow, activePath).severity;
+}
+
+function formatUpstream(selectedRow: AppRow): string {
+	const upstream = projectUpstream(selectedRow);
+	if (upstream.kind === 'unavailable') {
+		return 'unavailable';
+	}
+	if (upstream.kind === 'none') {
+		return '-';
+	}
+	return `${upstream.branch} (↑${upstream.ahead} ↓${upstream.behind})`;
+}
+
+function getTagColor(tag: TagProjection['tag']): 'green' | 'yellow' | 'blue' | 'red' | 'magenta' {
 	if (tag === 'active') {
 		return 'green';
 	}
@@ -16,88 +45,30 @@ function getTagColor(tag: string): 'green' | 'yellow' | 'blue' | 'red' | 'magent
 	}
 	return 'magenta';
 }
-function getTagLabel(tag: string): string {
+
+function getTagLabel(tag: TagProjection['tag']): string {
 	return tag === 'main' ? 'root' : tag;
 }
 
-
-export function getActionVariant(selectedRow: AppRow, activePath: string | null): 'success' | 'error' | 'info' {
-	if (selectedRow.invalidReason) {
-		return 'error';
+function getWorkingTreePartLabel(kind: WorkingTreePartKind): string {
+	if (kind === 'staged') {
+		return 'index';
 	}
-	if (selectedRow.path === activePath) {
-		return 'success';
+	if (kind === 'unstaged') {
+		return 'worktree';
 	}
-	if ((selectedRow.workingTree?.conflicts ?? 0) > 0) {
-		return 'error';
-	}
-	if (
-		(selectedRow.workingTree?.staged ?? 0) > 0
-		|| (selectedRow.workingTree?.unstaged ?? 0) > 0
-		|| (selectedRow.workingTree?.untracked ?? 0) > 0
-	) {
-		return 'info';
-	}
-	return 'info';
-}
-
-function getNoteVariant(selectedRow: AppRow): 'success' | 'error' | 'info' {
-	if (selectedRow.invalidReason || selectedRow.tags.includes('external')) {
-		return selectedRow.invalidReason ? 'error' : 'info';
-	}
-	if ((selectedRow.workingTree?.conflicts ?? 0) > 0) {
-		return 'error';
-	}
-	if (
-		(selectedRow.workingTree?.staged ?? 0) > 0
-		|| (selectedRow.workingTree?.unstaged ?? 0) > 0
-		|| (selectedRow.workingTree?.untracked ?? 0) > 0
-	) {
-		return 'info';
-	}
-	return 'info';
-}
-
-function sanitizeInlineText(value: string): string {
-	return value
-		.replace(/[\r\n\t\u2028\u2029]+/g, ' ')
-		.replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
-		.replace(/\p{Cf}/gu, '')
-		.replace(/\s+/g, ' ')
-		.trim();
-}
-
-function formatUpstream(selectedRow: AppRow): string {
-	if (selectedRow.upstreamUnavailable) {
-		return 'unavailable';
-	}
-	if (!selectedRow.upstream) {
-		return '-';
-	}
-	return `${sanitizeInlineText(selectedRow.upstream.branch)} (↑${selectedRow.upstream.ahead} ↓${selectedRow.upstream.behind})`;
+	return kind;
 }
 
 function formatWorkingTree(selectedRow: AppRow): string {
-	if (!selectedRow.workingTree) {
+	const workingTree = projectWorkingTree(selectedRow);
+	if (workingTree.kind === 'unavailable') {
 		return 'unavailable';
 	}
-	const {staged, unstaged, untracked, conflicts} = selectedRow.workingTree;
-	if (staged === 0 && unstaged === 0 && untracked === 0 && conflicts === 0) {
+	if (workingTree.kind === 'clean') {
 		return 'clean';
 	}
-	const parts: string[] = [];
-	if (staged > 0) {
-		parts.push(`index ${staged}`);
-	}
-	if (unstaged > 0) {
-		parts.push(`worktree ${unstaged}`);
-	}
-	if (untracked > 0) {
-		parts.push(`untracked ${untracked}`);
-	}
-	if (conflicts > 0) {
-		parts.push(`conflicts ${conflicts}`);
-	}
+	const parts = workingTree.parts.map(part => `${getWorkingTreePartLabel(part.kind)} ${part.count}`);
 	return `dirty (${parts.join(' · ')})`;
 }
 
@@ -110,78 +81,64 @@ function formatUtcDateTime(timestampMs: number | undefined): string {
 }
 
 function formatPullRequest(selectedRow: AppRow): string {
-	if (!selectedRow.pullRequest || selectedRow.pullRequest.kind === 'none') {
+	const pullRequest = projectPullRequest(selectedRow);
+	if (pullRequest.kind === 'none') {
 		return 'none';
 	}
-	if (selectedRow.pullRequest.kind === 'unavailable') {
+	if (pullRequest.kind === 'unavailable') {
 		return 'unavailable';
 	}
-	const draft = selectedRow.pullRequest.isDraft ? 'draft/' : '';
-	return `#${selectedRow.pullRequest.number} ${draft}${selectedRow.pullRequest.state.toLowerCase()} → ${sanitizeInlineText(selectedRow.pullRequest.baseBranch)}`;
+	const draft = pullRequest.isDraft ? 'draft/' : '';
+	const stateText = pullRequest.state.toLowerCase();
+	return `#${pullRequest.number} ${draft}${stateText} → ${pullRequest.baseBranch}`;
 }
 
-function getPullRequestLabel(selectedRow: AppRow): string {
-	if (selectedRow.pullRequest?.kind === 'found' && selectedRow.pullRequest.state !== 'OPEN') {
-		return 'Last PR';
+function getPullRequestColorFromProjection(pullRequest: PullRequestProjection): 'green' | 'yellow' | 'red' | undefined {
+	if (pullRequest.kind === 'unavailable') {
+		return 'red';
 	}
-	return 'PR';
-}
-
-function getPullRequestTitleLabel(selectedRow: AppRow): string {
-	if (selectedRow.pullRequest?.kind === 'found' && selectedRow.pullRequest.state !== 'OPEN') {
-		return 'Last PR Title';
+	if (pullRequest.kind !== 'found' || pullRequest.isHistorical) {
+		return undefined;
 	}
-	return 'PR Title';
+	return pullRequest.isDraft ? 'yellow' : 'green';
 }
 
 export function getPullRequestColor(selectedRow: AppRow): 'green' | 'yellow' | 'red' | undefined {
-	if (!selectedRow.pullRequest || selectedRow.pullRequest.kind === 'none') {
-		return undefined;
-	}
-	if (selectedRow.pullRequest.kind === 'unavailable') {
-		return 'red';
-	}
-	if (selectedRow.pullRequest.state !== 'OPEN') {
-		return undefined;
-	}
-	return selectedRow.pullRequest.isDraft ? 'yellow' : 'green';
+	return getPullRequestColorFromProjection(projectPullRequest(selectedRow));
+}
+
+function getPullRequestLabel(pullRequest: PullRequestProjection): 'PR' | 'Last PR' {
+	return pullRequest.kind === 'found' && pullRequest.isHistorical ? 'Last PR' : 'PR';
+}
+
+function getPullRequestTitleLabel(pullRequest: PullRequestProjection): 'PR Title' | 'Last PR Title' {
+	return pullRequest.kind === 'found' && pullRequest.isHistorical ? 'Last PR Title' : 'PR Title';
+}
+
+function getPullRequestDimColor(pullRequest: PullRequestProjection): boolean {
+	return pullRequest.kind === 'found' && pullRequest.isHistorical;
 }
 
 function getActionMessage(selectedRow: AppRow, activePath: string | null): string {
-	if (selectedRow.invalidReason) {
+	const action = projectAction(selectedRow, activePath);
+	if (action.kind === 'blocked') {
 		return 'Cannot start this worktree.';
 	}
-	if (selectedRow.path === activePath) {
+	if (action.kind === 'active') {
 		return 'Already active. Press s to stop the current session.';
 	}
 	return 'Press Enter to start here and switch the active session.';
 }
 
 function getNotes(selectedRow: AppRow): string {
-	if (selectedRow.invalidReason) {
-		return selectedRow.invalidReason;
+	const note = projectNote(selectedRow);
+	if (note.kind === 'invalid') {
+		return note.invalidReason;
 	}
-	if (selectedRow.tags.includes('external')) {
+	if (note.kind === 'external') {
 		return 'External worktree managed outside the main checkout path.';
 	}
 	return 'Ready to launch with the configured command in this worktree.';
-}
-
-function getOrderedTags(tags: readonly string[]): string[] {
-	const tagPriority: Record<string, number> = {
-		active: 0,
-		main: 1,
-		external: 2,
-		invalid: 3,
-	};
-	return [...tags].sort((a, b) => {
-		const aPriority = tagPriority[a] ?? 10;
-		const bPriority = tagPriority[b] ?? 10;
-		if (aPriority === bPriority) {
-			return a.localeCompare(b);
-		}
-		return aPriority - bPriority;
-	});
 }
 
 type LineSpec = {
@@ -227,9 +184,8 @@ function getPanelLines(selectedRow: AppRow | undefined, activePath: string | nul
 	const lines: LineSpec[] = [section('Identity')];
 	const showFullPath = !compactDetails && selectedRow.shortPath !== selectedRow.path;
 	const showTags = !compactDetails;
-	const pullRequestTitle = selectedRow.pullRequest?.kind === 'found' && !compactDetails
-		? sanitizeInlineText(selectedRow.pullRequest.title)
-		: null;
+	const pullRequest = projectPullRequest(selectedRow);
+	const pullRequestTitle = pullRequest.kind === 'found' && !compactDetails ? pullRequest.title : null;
 
 	lines.push(
 		{text: `Branch: ${sanitizeInlineText(selectedRow.branch)}`, bold: true},
@@ -242,7 +198,7 @@ function getPanelLines(selectedRow: AppRow | undefined, activePath: string | nul
 	lines.push({text: `Branch Created: ${formatUtcDateTime(selectedRow.branchCreatedAtMs)}`});
 
 	if (showTags) {
-		for (const tag of getOrderedTags(selectedRow.tags.filter(tag => tag !== 'active'))) {
+		for (const {tag} of getOrderedNonActiveTags(selectedRow.tags)) {
 			lines.push({text: getTagLabel(tag).toUpperCase(), color: getTagColor(tag)});
 		}
 	}
@@ -253,17 +209,17 @@ function getPanelLines(selectedRow: AppRow | undefined, activePath: string | nul
 		{text: `Upstream: ${formatUpstream(selectedRow)}`},
 		{text: `Status: ${formatWorkingTree(selectedRow)}`},
 		{
-			text: `${getPullRequestLabel(selectedRow)}: ${formatPullRequest(selectedRow)}`,
-			color: getPullRequestColor(selectedRow),
-			dimColor: selectedRow.pullRequest?.kind === 'found' && selectedRow.pullRequest.state !== 'OPEN',
+			text: `${getPullRequestLabel(pullRequest)}: ${formatPullRequest(selectedRow)}`,
+			color: getPullRequestColorFromProjection(pullRequest),
+			dimColor: getPullRequestDimColor(pullRequest),
 		},
 	);
 	if (pullRequestTitle) {
-		lines.push({text: `${getPullRequestTitleLabel(selectedRow)}: ${pullRequestTitle}`, dimColor: selectedRow.pullRequest?.kind === 'found' && selectedRow.pullRequest.state !== 'OPEN'});
+		lines.push({text: `${getPullRequestTitleLabel(pullRequest)}: ${pullRequestTitle}`, dimColor: getPullRequestDimColor(pullRequest)});
 	}
 
 	const actionVariant = getActionVariant(selectedRow, activePath);
-	const noteVariant = getNoteVariant(selectedRow);
+	const noteVariant = projectNote(selectedRow).severity;
 	lines.push(
 		divider(),
 		section('Action'),
@@ -280,16 +236,6 @@ function getPanelLines(selectedRow: AppRow | undefined, activePath: string | nul
 	return lines;
 }
 
-function getScrollbarThumbRows(totalLines: number, viewportHeight: number, scrollOffset: number): Set<number> {
-	if (totalLines <= viewportHeight) {
-		return new Set();
-	}
-
-	const thumbSize = Math.max(1, Math.floor((viewportHeight / totalLines) * viewportHeight));
-	const maxScrollOffset = Math.max(1, totalLines - viewportHeight);
-	const thumbStart = Math.round((scrollOffset / maxScrollOffset) * (viewportHeight - thumbSize));
-	return new Set(Array.from({length: thumbSize}, (_, index) => thumbStart + index));
-}
 
 export function ActionPanel({
 	selectedRow,
@@ -311,16 +257,14 @@ export function ActionPanel({
 	scrollOffset?: number;
 }) {
 	const lines = getPanelLines(selectedRow, activePath, setupAvailable, compactDetails ?? false);
-	const contentViewportHeight = height === undefined ? undefined : Math.max(1, height - 3);
-	const maxScrollOffset = contentViewportHeight === undefined ? 0 : Math.max(0, lines.length - contentViewportHeight);
-	const effectiveScrollOffset = Math.min(Math.max(scrollOffset, 0), maxScrollOffset);
-	const visibleLines = contentViewportHeight === undefined
-		? lines
-		: lines.slice(effectiveScrollOffset, effectiveScrollOffset + contentViewportHeight);
+	const viewport = height === undefined ? undefined : sliceListViewport(lines, height - 3, scrollOffset);
+	const contentViewportHeight = viewport?.viewportHeight;
+	const effectiveScrollOffset = viewport?.scrollOffset ?? 0;
+	const visibleLines = viewport?.visibleItems ?? lines;
 
-	const showScrollbar = contentViewportHeight !== undefined && lines.length > contentViewportHeight;
+	const showScrollbar = viewport !== undefined && lines.length > viewport.viewportHeight;
 	const scrollbarThumbRows = showScrollbar
-		? getScrollbarThumbRows(lines.length, contentViewportHeight, effectiveScrollOffset)
+		? getScrollbarThumbRows(lines.length, viewport.viewportHeight, viewport.scrollOffset)
 		: new Set<number>();
 
 	return (

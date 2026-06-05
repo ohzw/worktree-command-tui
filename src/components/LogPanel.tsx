@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import type {AppLogEntry} from '../core/runtime.js';
+import {getScrollbarThumbRows, sliceTailViewport} from '../terminal/viewport.js';
 
 const ESCAPE = '\u001B';
 const CSI = '\u009B';
@@ -274,16 +275,6 @@ export function buildLogLines(logs: AppLogEntry[]): LineSpec[] {
 	return lines;
 }
 
-function getScrollbarThumbRows(totalLines: number, viewportHeight: number, scrollOffset: number): Set<number> {
-	if (totalLines <= viewportHeight) {
-		return new Set();
-	}
-
-	const thumbSize = Math.max(1, Math.floor((viewportHeight / totalLines) * viewportHeight));
-	const maxScrollOffset = Math.max(1, totalLines - viewportHeight);
-	const thumbStart = Math.round((scrollOffset / maxScrollOffset) * (viewportHeight - thumbSize));
-	return new Set(Array.from({length: thumbSize}, (_, index) => thumbStart + index));
-}
 
 export function LogPanel({
 	logs,
@@ -299,18 +290,13 @@ export function LogPanel({
 	title?: string;
 }) {
 	const lines = buildLogLines(logs);
-	const contentViewportHeight = height === undefined ? lines.length : Math.max(1, height - 3);
-	const maxScrollOffset = contentViewportHeight === undefined ? 0 : Math.max(0, lines.length - contentViewportHeight);
-	const effectiveScrollOffset = Math.min(Math.max(scrollOffset, 0), maxScrollOffset);
-	const startIndex = contentViewportHeight === undefined
-		? 0
-		: Math.max(0, lines.length - contentViewportHeight - effectiveScrollOffset);
-	const visibleLines = contentViewportHeight === undefined
-		? lines
-		: lines.slice(startIndex, startIndex + contentViewportHeight);
-	const showScrollbar = contentViewportHeight !== undefined && lines.length > contentViewportHeight;
+	const viewport = sliceTailViewport(lines, height === undefined ? lines.length : height - 3, scrollOffset);
+	const contentViewportHeight = viewport.viewportHeight;
+	const startIndex = viewport.startIndex;
+	const visibleLines = viewport.visibleItems;
+	const showScrollbar = height !== undefined && lines.length > contentViewportHeight;
 	const scrollbarThumbRows = showScrollbar
-		? getScrollbarThumbRows(lines.length, contentViewportHeight, maxScrollOffset - effectiveScrollOffset)
+		? getScrollbarThumbRows(lines.length, contentViewportHeight, viewport.topScrollOffset)
 		: new Set<number>();
 
 	return (

@@ -25,7 +25,7 @@ function getIndicator(row: AppRow): string {
 	return '-';
 }
 
-function getRowColor(row: AppRow, isSelected: boolean): 'cyan' | 'green' | 'red' | 'yellow' | undefined {
+function getRowColor(row: AppRow, isSelected: boolean): 'cyan' | 'green' | 'red' | undefined {
 	if (row.tags.includes('active')) {
 		return 'green';
 	}
@@ -34,9 +34,6 @@ function getRowColor(row: AppRow, isSelected: boolean): 'cyan' | 'green' | 'red'
 	}
 	if (row.tags.includes('invalid')) {
 		return 'red';
-	}
-	if (row.tags.includes('external')) {
-		return 'yellow';
 	}
 	return undefined;
 }
@@ -113,6 +110,7 @@ export function WorktreeList({
 								key={row.path}
 								color={getRowColor(row, isSelected)}
 								dimColor={!isSelected && getRowColor(row, isSelected) === undefined}
+								bold={row.tags.includes('active')}
 								wrap="truncate-end"
 							>
 								{line}

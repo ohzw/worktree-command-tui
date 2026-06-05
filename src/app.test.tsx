@@ -40,6 +40,10 @@ async function waitForInput(): Promise<void> {
 	setImmediate(resolve);
 	await promise;
 }
+function stripAnsi(value: string | null | undefined): string {
+	return (value ?? '').replace(/\u001B\[[0-9;]*m/g, '');
+}
+
 
 it('uses alternate screen and incremental rendering options', () => {
 	expect(APP_RENDER_OPTIONS).toEqual({alternateScreen: true, exitOnCtrlC: true, incrementalRendering: true});
@@ -100,7 +104,7 @@ it('renders colored pane labels and active marker in the main layout', () => {
 	expect(lastFrame()).toContain('idle');
 	expect(lastFrame()).toContain('↑↓/jk Move | Enter Switch | L Logs | s Stop | r Refresh | ? Help | q Quit');
 	expect(lastFrame()).not.toContain('PageUp');
-	expect(lastFrame()).toContain('* feat/a');
+	expect(stripAnsi(lastFrame())).toContain('* feat/a');
 });
 
 it('renders setup in the primary key hints only when setup is available', () => {
@@ -244,7 +248,7 @@ it('stacks panes responsively on medium-width terminals when there is enough ver
 	);
 	expect(lastFrame()).toContain('Worktrees');
 	expect(lastFrame()).toContain('Selection / Action');
-	expect(lastFrame()).toContain('> - develop [root]');
+	expect(stripAnsi(lastFrame())).toContain('> - develop [root]');
 });
 
 it('shows more stacked worktree rows as terminal height grows', () => {
@@ -264,7 +268,7 @@ it('shows more stacked worktree rows as terminal height grows', () => {
 	const {lastFrame} = render(
 		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns, rows}} />,
 	);
-	const lines = (lastFrame() ?? '').split('\n');
+	const lines = stripAnsi(lastFrame() ?? '').split('\n');
 	expect(lines.join('\n')).not.toContain('Logs (*.log · tail 120)');
 	const worktreesHeader = lines.findIndex(line => line.includes('Worktrees'));
 	const selectionHeader = lines.findIndex((line, index) => index > worktreesHeader && line.includes('Selection / Action'));
@@ -476,13 +480,13 @@ it('scrolls worktree list with SGR mouse wheel input', async () => {
 	const {lastFrame, stdin} = render(
 		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 16}} />,
 	);
-	expect(lastFrame()).not.toContain('feat-8');
-	expect(lastFrame()).toContain('│ > * feat-0');
+	expect(stripAnsi(lastFrame())).not.toContain('feat-8');
+	expect(stripAnsi(lastFrame())).toContain('│ > * feat-0');
 	stdin.write('\u001B[<65;10;10M');
 	await waitForInput();
 	await waitForInput();
-	expect(lastFrame()).toContain('│   - feat-3');
-	expect(lastFrame()).not.toContain('│ > - feat-0');
+	expect(stripAnsi(lastFrame())).toContain('│   - feat-3');
+	expect(stripAnsi(lastFrame())).not.toContain('│ > - feat-0');
 });
 
 it('scrolls selection details with SGR mouse wheel in tall split layout', async () => {
@@ -609,7 +613,7 @@ it('truncates long branch labels in the worktree pane', () => {
 		activeBranch: null,
 	});
 	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />);
-	expect(lastFrame()).toContain('feature/this-is-a-very-long-br…');
+	expect(stripAnsi(lastFrame())).toContain('feature/this-is-a-very-long-br…');
 });
 
 it('truncates long branch and path values in the selection pane', () => {

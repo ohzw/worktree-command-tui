@@ -8,7 +8,7 @@ import {HelpWindow} from './components/HelpWindow.js';
 import {FloatingLogWindow} from './components/FloatingLogWindow.js';
 import {LogPanel, buildLogLines} from './components/LogPanel.js';
 import {WorktreeList} from './components/WorktreeList.js';
-import type {AppActions, AppModel, AppRow, AppStatus, RowTag} from './core/runtime.js';
+import type {AppActions, AppLogRefresh, AppModel, AppRow, AppStatus, RowTag} from './core/runtime.js';
 import {clampSelectionIndex, decideEnterInteraction, decideSetupInteraction, getNextSelectedPath, getSelectedIndex} from './core/tui-interaction.js';
 
 export interface ShellDimensions {
@@ -92,7 +92,6 @@ function getLogPaneHeight(_rootHeight: number): number {
 const ACTIVE_TAG: RowTag = 'active';
 const ALREADY_ACTIVE_MESSAGE = 'already active';
 
-
 function syncActiveTags(rows: AppRow[], activePath: string | null): AppRow[] {
 	let changed = false;
 	const nextRows = rows.map(row => {
@@ -111,7 +110,31 @@ function syncActiveTags(rows: AppRow[], activePath: string | null): AppRow[] {
 	return changed ? nextRows : rows;
 }
 
+function shouldRefreshLogs(model: AppModel): boolean {
+	if (model.activePath === null) {
+		return false;
+	}
+	if (model.status.kind === 'running' || model.status.kind === 'error') {
+		return true;
+	}
+	return model.status.message === ALREADY_ACTIVE_MESSAGE;
+}
 
+function getStatusAfterLogRefresh(current: AppModel, refresh: AppLogRefresh): AppStatus {
+	if (current.status.kind !== 'running') {
+		return current.status;
+	}
+	if (current.activePath === refresh.activePath && current.activeBranch === refresh.activeBranch) {
+		return current.status;
+	}
+	if (refresh.activePath === null) {
+		return {kind: 'idle', message: 'session ended'};
+	}
+	if (refresh.activeBranch) {
+		return {kind: 'running', message: `Active: ${refresh.activeBranch}`};
+	}
+	return {kind: 'running', message: 'running'};
+}
 export function App({
 	initialModel,
 	actions,
@@ -170,9 +193,8 @@ export function App({
 		};
 	}, []);
 
-
 	useEffect(() => {
-		if (model.activePath === null || (model.status.kind !== 'running' && model.status.kind !== 'error' && model.status.message !== ALREADY_ACTIVE_MESSAGE)) {
+		if (!shouldRefreshLogs(model)) {
 			return;
 		}
 		// Only logs and active-session liveness need near-real-time updates.
@@ -193,11 +215,7 @@ export function App({
 
 					setModel(current => {
 						const activeChanged = current.activePath !== refresh.activePath || current.activeBranch !== refresh.activeBranch;
-						const status = current.status.kind === 'running' && activeChanged
-							? refresh.activePath === null
-								? {kind: 'idle' as const, message: 'session ended'}
-								: {kind: 'running' as const, message: refresh.activeBranch ? `Active: ${refresh.activeBranch}` : 'running'}
-							: current.status;
+						const status = getStatusAfterLogRefresh(current, refresh);
 						return {
 							...current,
 							logs: refresh.logs,

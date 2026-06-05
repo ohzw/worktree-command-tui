@@ -3,7 +3,8 @@ import {chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSyn
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {describe, expect, it, vi} from 'vitest';
-import {buildActions, parseGitStatusSummary, toAppRow} from './runtime.js';
+import {parseGitStatusSummary} from './git-metadata.js';
+import {buildActions, toAppRow} from './runtime.js';
 const TEST_GITHUB_OWNER = 'finn-inc';
 const TEST_GITHUB_REPOSITORY = 'reclaim-the-forest';
 const TEST_GITHUB_REMOTE_URL = `https://github.com/${TEST_GITHUB_OWNER}/${TEST_GITHUB_REPOSITORY}.git`;

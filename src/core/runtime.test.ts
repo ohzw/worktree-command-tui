@@ -84,6 +84,25 @@ describe('buildActions setup command', () => {
 		await vi.waitFor(() => expect(existsSync(path.join(root, 'started.txt'))).toBe(true));
 		expect(existsSync(path.join(root, 'setup.txt'))).toBe(false);
 	});
+
+	it('adds local reflog branch creation time to rows', async () => {
+		const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'wctui-runtime-branch-created-')));
+		initGitRepo(root);
+		writeFileSync(path.join(root, 'package.json'), '{}');
+		writeFileSync(path.join(root, '.worktree-command-tui.jsonc'), JSON.stringify({
+			namespace: 'runtime-branch-created',
+			command: ['node', '-e', 'console.log("ready")'],
+			port: 31237,
+			requiredFiles: ['package.json'],
+			orphanMatchers: [],
+		}));
+
+		const actions = await buildActions(root);
+		const model = await actions.refresh();
+
+		expect(typeof model.rows[0]?.branchCreatedAtMs).toBe('number');
+		expect(Number.isFinite(model.rows[0]?.branchCreatedAtMs)).toBe(true);
+	});
 });
 
 	it('keeps running status after setup when a session is active', async () => {
@@ -120,11 +139,13 @@ describe('toAppRow', () => {
 				headSha: '46af3f1cec1c61a50aa178552c55b5c6c3e5575e',
 				isMain: false,
 				isExternal: false,
+				createdAtMs: null,
 			},
 			null,
 			null,
 			{
 				upstreamUnavailable: true,
+				branchCreatedAtMs: 1_780_000_000_000,
 				workingTree: {staged: 0, unstaged: 1, untracked: 2, conflicts: 0},
 				pullRequest: {
 					kind: 'found',
@@ -139,6 +160,7 @@ describe('toAppRow', () => {
 		);
 
 		expect(row.upstreamUnavailable).toBe(true);
+		expect(row.branchCreatedAtMs).toBe(1_780_000_000_000);
 		expect(row.workingTree).toEqual({staged: 0, unstaged: 1, untracked: 2, conflicts: 0});
 		expect(row.pullRequest).toEqual({
 			kind: 'found',

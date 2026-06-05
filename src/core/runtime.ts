@@ -54,6 +54,7 @@ export interface AppRow {
 	upstreamUnavailable?: boolean;
 	workingTree?: WorkingTreeInfo;
 	pullRequest?: PullRequestInfo;
+	branchCreatedAtMs?: number;
 	invalidReason?: string;
 }
 
@@ -222,19 +223,40 @@ async function readPullRequestInfo(cwd: string, branch: string): Promise<PullReq
 	}
 }
 
+async function readBranchCreatedAtMs(cwd: string, branch: string): Promise<number | null> {
+	if (branch.startsWith('(')) {
+		return null;
+	}
+
+	try {
+		const {stdout} = await execFileAsync('git', ['reflog', 'show', '--format=%ct', `refs/heads/${branch}`], {cwd});
+		const trimmed = stdout.trim();
+		if (trimmed.length === 0) {
+			return null;
+		}
+		const timestamps = trimmed.split('\n');
+		const firstTimestampSeconds = Number(timestamps.at(-1));
+		return Number.isFinite(firstTimestampSeconds) ? firstTimestampSeconds * 1000 : null;
+	} catch {
+		return null;
+	}
+}
+
 async function readRowMetadata(
 	worktreePath: string,
 	branch: string,
-): Promise<Pick<AppRow, 'upstream' | 'upstreamUnavailable' | 'workingTree' | 'pullRequest'>> {
-	const [statusSummary, pullRequest] = await Promise.all([
+): Promise<Pick<AppRow, 'upstream' | 'upstreamUnavailable' | 'workingTree' | 'pullRequest' | 'branchCreatedAtMs'>> {
+	const [statusSummary, pullRequest, branchCreatedAtMs] = await Promise.all([
 		readGitStatusSummary(worktreePath),
 		readPullRequestInfo(worktreePath, branch),
+		readBranchCreatedAtMs(worktreePath, branch),
 	]);
 	return {
 		upstream: statusSummary.upstream,
 		upstreamUnavailable: statusSummary.upstreamUnavailable,
 		workingTree: statusSummary.workingTree,
 		pullRequest,
+		branchCreatedAtMs: branchCreatedAtMs ?? undefined,
 	};
 }
 
@@ -254,7 +276,7 @@ export function toAppRow(
 	worktree: WorktreeRow,
 	activePath: string | null,
 	invalidReason: string | null,
-	metadata: Pick<AppRow, 'upstream' | 'upstreamUnavailable' | 'workingTree' | 'pullRequest'>,
+	metadata: Pick<AppRow, 'upstream' | 'upstreamUnavailable' | 'workingTree' | 'pullRequest' | 'branchCreatedAtMs'>,
 ): AppRow {
 	const tags: RowTag[] = [];
 	if (worktree.isMain) {
@@ -280,6 +302,7 @@ export function toAppRow(
 		upstreamUnavailable: metadata.upstreamUnavailable,
 		workingTree: metadata.workingTree,
 		pullRequest: metadata.pullRequest,
+		branchCreatedAtMs: metadata.branchCreatedAtMs,
 		invalidReason: invalidReason ?? undefined,
 	};
 }

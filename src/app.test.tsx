@@ -98,12 +98,106 @@ it('renders colored pane labels and active marker in the main layout', () => {
 	expect(lastFrame()).toContain('Worktrees');
 	expect(lastFrame()).toContain('Selection / Action');
 	expect(lastFrame()).toContain('idle');
-	expect(lastFrame()).toContain('Wheel/PgUp/PgDn list & selection scroll');
-	expect(lastFrame()).toContain('[/] log scroll');
-	expect(lastFrame()).toContain('L full-screen logs');
+	expect(lastFrame()).toContain('↑↓/jk Move | Enter Switch | L Logs | s Stop | r Refresh | ? Help | q Quit');
+	expect(lastFrame()).not.toContain('PageUp');
 	expect(lastFrame()).toContain('* feat/a');
 });
 
+it('renders setup in the primary key hints only when setup is available', () => {
+	const disabled = createModel({setupAvailable: false});
+	const enabled = createModel({setupAvailable: true});
+
+	expect(render(
+		<App initialModel={disabled} actions={makeFakeActions(disabled)} windowSizeOverride={{columns: 140, rows: 30}} />,
+	).lastFrame()).not.toContain('i Setup');
+	expect(render(
+		<App initialModel={enabled} actions={makeFakeActions(enabled)} windowSizeOverride={{columns: 140, rows: 30}} />,
+	).lastFrame()).toContain('Enter Switch | i Setup | L Logs');
+});
+
+it('opens and closes detailed key help', async () => {
+	const model = createModel({setupAvailable: true});
+	const {lastFrame, stdin} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />,
+	);
+
+	stdin.write('?');
+	await waitForInput();
+	expect(lastFrame()).toContain('Keyboard Help');
+	expect(lastFrame()).toContain('Movement');
+	expect(lastFrame()).toContain('g/G');
+	expect(lastFrame()).toContain('first/last');
+	expect(lastFrame()).toContain('PageUp/PageDn');
+	expect(lastFrame()).toContain('selection page');
+	expect(lastFrame()).toContain('i');
+	expect(lastFrame()).toContain('setup selected worktree');
+
+	stdin.write('q');
+	await waitForInput();
+	expect(lastFrame()).toContain('Worktrees');
+	expect(lastFrame()).not.toContain('Keyboard Help');
+});
+
+
+it('opens key help over the log overlay and returns to logs when closed', async () => {
+	const model = createModel();
+	const {lastFrame, stdin} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />,
+	);
+
+	stdin.write('L');
+	await waitForInput();
+	expect(lastFrame()).toContain('full screen');
+
+	stdin.write('?');
+	await waitForInput();
+	expect(lastFrame()).toContain('Keyboard Help');
+
+	stdin.write('?');
+	await waitForInput();
+	expect(lastFrame()).toContain('full screen');
+	expect(lastFrame()).not.toContain('Keyboard Help');
+});
+
+it('closes key help with escape', async () => {
+	const model = createModel();
+	const {lastFrame, stdin} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />,
+	);
+
+	stdin.write('?');
+	await waitForInput();
+	expect(lastFrame()).toContain('Keyboard Help');
+
+	stdin.write('\u001B');
+	await new Promise(resolve => setTimeout(resolve, 30));
+	expect(lastFrame()).toContain('Worktrees');
+	expect(lastFrame()).not.toContain('Keyboard Help');
+});
+
+it('ignores mouse wheel scrolling while key help is open', async () => {
+	const model = createModel({
+		logs: [{
+			name: 'feat-a.log',
+			path: '/repo/.git/worktree-command-tui/logs/feat-a.log',
+			content: Array.from({length: 40}, (_, index) => `line ${index + 1}`).join('\n'),
+		}],
+	});
+	const {lastFrame, stdin} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />,
+	);
+
+	stdin.write('?');
+	await waitForInput();
+	stdin.write('\u001B[<64;10;20M\u001B[<64;10;20M\u001B[<64;10;20M');
+	await waitForInput();
+	stdin.write('?');
+	await waitForInput();
+	stdin.write('L');
+	await waitForInput();
+
+	expect(lastFrame()).toContain('line 40');
+});
 it('keeps the pane layout on narrow terminals when vertical space is available', () => {
 	const model = createModel();
 	const {lastFrame} = render(

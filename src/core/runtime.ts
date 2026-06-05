@@ -1,5 +1,5 @@
 import path from 'node:path';
-import {loadToolConfig} from './config.js';
+import {loadToolConfig} from './config-lifecycle.js';
 import {readWorktrees, sortWorktrees, toShortPath, type WorktreeRow} from './git-worktrees.js';
 import {readGitStatusSummary, readBranchCreatedAtMs, resolveRepoContext, type UpstreamInfo, type WorkingTreeInfo} from './git-metadata.js';
 import {readPullRequestInfo, type PullRequestInfo} from './github-metadata.js';
@@ -9,6 +9,7 @@ import {getSessionPaths, readSessionRecord, writeSessionRecord, clearSessionReco
 import {runCommandToLog, startDetachedCommand} from './command-runner.js';
 import {stopSessionWithFallback} from './process-control.js';
 import {isProcessGroupAlive, killProcessGroup, killPortOwner, killOrphans} from './posix-process.js';
+import {createRuntimeStateActions} from './runtime-state.js';
 
 const SHORT_SHA_LENGTH = 8;
 
@@ -173,124 +174,28 @@ export async function buildActions(cwd: string): Promise<AppActions> {
 	const {workspaceRoot, gitCommonDir, mainWorktreePath} = await resolveRepoContext(cwd);
 	const config = await loadToolConfig({repoRoot: workspaceRoot});
 	const paths = getSessionPaths(gitCommonDir, config.namespace);
-
-	const refresh = async (): Promise<AppModel> => buildInitialModel(cwd);
-	const refreshLogs = async (): Promise<AppLogEntry[]> => {
-		const active = await readSessionRecord(paths, {isSessionAlive: isProcessGroupAlive});
-		return readLogs(paths.logsDir, active?.logPath ?? null);
-	};
-
-	const stop = async (): Promise<AppModel> => {
-		const active = await readSessionRecord(paths, {isSessionAlive: isProcessGroupAlive});
-		if (active) {
-			await stopRecordedSession(active.pgid, active.port, config.orphanMatchers);
-			await clearSessionRecord(paths);
-		}
-
-		const model = await refresh();
-		return {
-			...model,
-			activePath: null,
-			activeBranch: null,
-			status: {kind: 'idle', message: active ? 'stopped' : 'already stopped'},
-		};
-	};
-
-	const setup = async (worktreePath: string): Promise<AppModel> => {
-		if (config.setupCommand === undefined) {
-			const model = await refresh();
-			return {
-				...model,
-				status: {kind: 'idle', message: 'setup command is not configured'},
-			};
-		}
-
-		const rows = await readWorktrees(workspaceRoot, mainWorktreePath);
-		const selected = rows.find(row => row.path === worktreePath);
-		if (!selected) {
-			throw new Error(`Worktree disappeared: ${worktreePath}`);
-		}
-
-		const logFileBase = `${selected.branch.replace(/[\\/]/g, '-')}.setup`;
-		const setupLogPath = path.join(paths.logsDir, `${logFileBase}.log`);
-		try {
-			await runCommandToLog({
-				command: config.setupCommand,
-				cwd: worktreePath,
-				logsDir: paths.logsDir,
-				logFileBase,
-				errorLabel: 'setup command',
-			});
-		} catch (error) {
-			const model = await refresh();
-			return {
-				...model,
-				status: {kind: 'error', message: error instanceof Error ? error.message : String(error)},
-				logs: await readLogs(paths.logsDir, setupLogPath),
-			};
-		}
-
-		const model = await refresh();
-		return {
-			...model,
-			status: {kind: model.activePath === null ? 'idle' : 'running', message: `setup complete for ${selected.branch}`},
-			logs: await readLogs(paths.logsDir, setupLogPath),
-		};
-	};
-
-	const start = async (worktreePath: string): Promise<AppModel> => {
-		const current = await readSessionRecord(paths, {isSessionAlive: isProcessGroupAlive});
-		if (current?.worktreePath === worktreePath) {
-			const model = await refresh();
-			return {
-				...model,
-				activePath: current.worktreePath,
-				activeBranch: current.branch,
-				status: {kind: 'idle', message: 'already active'},
-			};
-		}
-
-		const invalidReason = await getInvalidReason(worktreePath, config.requiredFiles);
-		if (invalidReason) {
-			throw new Error(invalidReason);
-		}
-
-		if (current) {
-			await stopRecordedSession(current.pgid, current.port, config.orphanMatchers);
-			await clearSessionRecord(paths);
-		}
-
-		const rows = await readWorktrees(workspaceRoot, mainWorktreePath);
-		const selected = rows.find(row => row.path === worktreePath);
-		if (!selected) {
-			throw new Error(`Worktree disappeared: ${worktreePath}`);
-		}
-
-		const started = await startDetachedCommand({
-			command: config.command,
-			cwd: worktreePath,
-			logsDir: paths.logsDir,
-			logFileBase: selected.branch.replace(/[\\/]/g, '-'),
-		});
-		await writeSessionRecord(paths, {
-			namespace: config.namespace,
-			worktreePath,
-			branch: selected.branch,
-			pid: started.pid,
-			pgid: started.pgid,
-			port: config.port,
-			logPath: started.logPath,
-			startedAt: new Date().toISOString(),
-		});
-
-		const model = await refresh();
-		return {
-			...model,
-			activePath: worktreePath,
-			activeBranch: selected.branch,
-			status: {kind: 'running', message: `started ${selected.branch}`},
-		};
-	};
-
-	return {setup, start, stop, refresh, refreshLogs};
+	return createRuntimeStateActions({
+		config,
+		paths,
+		adapter: {
+			refresh: async () => buildInitialModel(cwd),
+			readActive: async () => readSessionRecord(paths, {isSessionAlive: isProcessGroupAlive}),
+			readLogs: async logPath => readLogs(paths.logsDir, logPath),
+			readWorktreeBranch: async worktreePath => {
+				const rows = await readWorktrees(workspaceRoot, mainWorktreePath);
+				const selected = rows.find(row => row.path === worktreePath);
+				if (!selected) {
+					throw new Error(`Worktree disappeared: ${worktreePath}`);
+				}
+				return selected.branch;
+			},
+			getInvalidReason: async worktreePath => getInvalidReason(worktreePath, config.requiredFiles),
+			runSetup: runCommandToLog,
+			startCommand: startDetachedCommand,
+			stopSession: async active => stopRecordedSession(active.pgid, active.port, config.orphanMatchers),
+			clearSession: async () => clearSessionRecord(paths),
+			writeSession: async record => writeSessionRecord(paths, record),
+			nowIso: () => new Date().toISOString(),
+		},
+	});
 }

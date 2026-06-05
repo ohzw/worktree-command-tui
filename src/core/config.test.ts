@@ -2,7 +2,8 @@ import {describe, expect, it} from 'vitest';
 import {mkdtempSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {CONFIG_FILE_NAME, LEGACY_CONFIG_FILE_NAME, loadToolConfig} from './config.js';
+import {CONFIG_FILE_NAME, LEGACY_CONFIG_FILE_NAME} from './config.js';
+import {loadToolConfig} from './config-lifecycle.js';
 
 describe('loadToolConfig', () => {
 	it('loads .worktree-command-tui.jsonc with comments and preserves argv command', async () => {

@@ -934,6 +934,34 @@ it('keeps invalid enter feedback when stale log refresh liveness resolves', asyn
 	expect(lastFrame()).toContain('Active: develop');
 });
 
+it('continues refreshing logs after invalid-row feedback while a session is active', async () => {
+	const invalidReason = 'Missing required files: default.project.json';
+	const model = createModel({
+		rows: [
+			{path: '/repo', shortPath: '.', branch: 'develop', tags: ['active', 'main']},
+			{path: '/bad', shortPath: '/bad', branch: 'fix/bad', tags: ['invalid'], invalidReason},
+		],
+		activePath: '/repo',
+		activeBranch: 'develop',
+		status: {kind: 'running', message: 'Active: develop'},
+	});
+	const refreshLogs = vi.fn(async () => ({logs: model.logs, activePath: model.activePath, activeBranch: model.activeBranch}));
+	const start = vi.fn();
+	const {lastFrame, stdin} = render(<App initialModel={model} actions={{...makeFakeActions(model), refreshLogs, start}} windowSizeOverride={{columns: 120, rows: 30}} />);
+
+	stdin.write('j');
+	await waitForInput();
+	stdin.write('\r');
+	await waitForInput();
+	expect(start).not.toHaveBeenCalled();
+	expect(lastFrame()).toContain('Status: error');
+
+	const callsAfterError = refreshLogs.mock.calls.length;
+	await vi.waitFor(() => expect(refreshLogs.mock.calls.length).toBeGreaterThan(callsAfterError), {timeout: 1000});
+	expect(lastFrame()).toContain(invalidReason);
+});
+
+
 
 
 it('keeps the same worktree selected when start reorders the list', async () => {

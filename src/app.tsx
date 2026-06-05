@@ -9,6 +9,7 @@ import {FloatingLogWindow} from './components/FloatingLogWindow.js';
 import {LogPanel, buildLogLines} from './components/LogPanel.js';
 import {WorktreeList} from './components/WorktreeList.js';
 import type {AppActions, AppModel, AppRow, AppStatus, RowTag} from './core/runtime.js';
+import {clampSelectionIndex, decideEnterInteraction, decideSetupInteraction, getNextSelectedPath, getSelectedIndex} from './core/tui-interaction.js';
 
 export interface ShellDimensions {
 	rootWidth: number;
@@ -57,15 +58,6 @@ export function getMouseWheelDelta(input: string): number {
 	return parseMouseWheelEvents(input).reduce((sum, event) => sum + event.delta, 0);
 }
 
-function getNextSelectedPath(rows: AppModel['rows'], currentPath: string | null): string | null {
-	if (rows.length === 0) {
-		return null;
-	}
-	if (currentPath && rows.some(row => row.path === currentPath)) {
-		return currentPath;
-	}
-	return rows[0]!.path;
-}
 
 export function getShellDimensions(columns: number, rows: number): ShellDimensions {
 	const rootWidth = Math.max(columns, 1);
@@ -178,16 +170,9 @@ export function App({
 		};
 	}, []);
 
-	useEffect(() => {
-		return () => {
-			if (alertTimeoutRef.current !== null) {
-				clearTimeout(alertTimeoutRef.current);
-			}
-		};
-	}, []);
 
 	useEffect(() => {
-		if (model.activePath === null || (model.status.kind !== 'running' && model.status.message !== ALREADY_ACTIVE_MESSAGE)) {
+		if (model.activePath === null || (model.status.kind !== 'running' && model.status.kind !== 'error' && model.status.message !== ALREADY_ACTIVE_MESSAGE)) {
 			return;
 		}
 		// Only logs and active-session liveness need near-real-time updates.
@@ -234,13 +219,7 @@ export function App({
 		};
 	}, [actions, model.activePath, model.status.kind, model.status.message]);
 
-	const selectedIndex = useMemo(() => {
-		if (selectedPath === null) {
-			return 0;
-		}
-		const foundIndex = model.rows.findIndex(row => row.path === selectedPath);
-		return foundIndex >= 0 ? foundIndex : 0;
-	}, [model.rows, selectedPath]);
+	const selectedIndex = useMemo(() => getSelectedIndex(model.rows, selectedPath), [model.rows, selectedPath]);
 	const selected = model.rows[selectedIndex];
 	const {rootWidth, rootHeight, bodyWidth, listWidth, actionWidth} = getShellDimensions(columns, rows);
 	const minimalLayout = shouldUseMinimalLayout(rootWidth, rootHeight);
@@ -262,10 +241,11 @@ export function App({
 	const logScrollPageSize = Math.max(1, Math.floor((logViewportHeight || rootHeight) / 2));
 
 	function moveSelection(nextIndex: number): void {
-		if (model.rows.length === 0) {
+		const clampedIndex = clampSelectionIndex(nextIndex, model.rows.length);
+		if (clampedIndex === null) {
 			return;
 		}
-		setSelectedPath(model.rows[Math.min(Math.max(nextIndex, 0), model.rows.length - 1)]!.path);
+		setSelectedPath(model.rows[clampedIndex]!.path);
 	}
 
 	function clearTransientAlert(): void {
@@ -389,22 +369,22 @@ export function App({
 		if (userActionInFlightRef.current) {
 			return;
 		}
-		if (key.return && selected) {
-			if (selected.invalidReason) {
-				invalidateStaleLogRefreshes();
-				setModel(current => ({...current, status: {kind: 'error', message: selected.invalidReason!}}));
+		if (key.return) {
+			const decision = decideEnterInteraction(selected, model.activePath);
+			if (decision.kind === 'ignore') {
+				return;
+			}
+			if (decision.kind === 'set-status') {
+				if (decision.suppressesBackgroundRefreshes) {
+					invalidateStaleLogRefreshes();
+				}
+				setModel(current => ({...current, status: decision.status}));
 				clearTransientAlert();
 				return;
 			}
-			if (selected.path === model.activePath) {
-				invalidateStaleLogRefreshes();
-				setModel(current => ({...current, status: {kind: 'idle', message: ALREADY_ACTIVE_MESSAGE}}));
-				clearTransientAlert();
-				return;
-			}
-			setModel(current => ({...current, status: {kind: 'starting', message: `Starting ${selected.branch}...`}}));
+			setModel(current => ({...current, status: decision.status}));
 			clearTransientAlert();
-			void apply(() => actions.start(selected.path));
+			void apply(() => actions.start(decision.path));
 			return;
 		}
 		if (input === 's') {
@@ -413,10 +393,14 @@ export function App({
 			void apply(() => actions.stop());
 			return;
 		}
-		if (input === 'i' && selected && model.setupAvailable) {
-			setModel(current => ({...current, status: {kind: 'setting-up', message: `Running setup for ${selected.branch}...`}}));
+		if (input === 'i') {
+			const decision = decideSetupInteraction(selected, model.setupAvailable);
+			if (decision.kind === 'ignore') {
+				return;
+			}
+			setModel(current => ({...current, status: decision.status}));
 			clearTransientAlert();
-			void apply(() => actions.setup(selected.path));
+			void apply(() => actions.setup(decision.path));
 			return;
 		}
 		if (input === 'r') {

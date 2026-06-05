@@ -1,46 +1,37 @@
 import {Box, Text} from 'ink';
 import type {AppRow} from '../core/runtime.js';
+import {projectWorktreeListRow, sanitizeInlineText} from '../core/worktree-projection.js';
+import {getScrollbarThumbRows, sliceListViewport} from '../terminal/viewport.js';
 
 const MIN_BRANCH_WIDTH = 24;
+type RowColor = 'cyan' | 'green' | 'red' | undefined;
 
-function sanitizeInlineText(value: string): string {
-	return value
-		.replace(/[\r\n\t\u2028\u2029]+/g, ' ')
-		.replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
-		.replace(/\p{Cf}/gu, '')
-		.replace(/\s+/g, ' ')
-		.trim();
-}
-
-function getIndicator(row: AppRow): string {
-	if (row.tags.includes('active')) {
+function getIndicator(state: ReturnType<typeof projectWorktreeListRow>['state']): string {
+	if (state === 'active') {
 		return '*';
 	}
-	if (row.tags.includes('invalid')) {
+	if (state === 'invalid') {
 		return '!';
 	}
-	if (row.tags.includes('external')) {
+	if (state === 'external') {
 		return '^';
 	}
 	return '-';
 }
 
-function getRowColor(row: AppRow, isSelected: boolean): 'cyan' | 'green' | 'red' | undefined {
-	if (row.tags.includes('active')) {
+function getRowColor(projection: ReturnType<typeof projectWorktreeListRow>): RowColor {
+	if (projection.state === 'active') {
 		return 'green';
 	}
-	if (isSelected) {
+	if (projection.isSelected) {
 		return 'cyan';
 	}
-	if (row.tags.includes('invalid')) {
+	if (projection.state === 'invalid') {
 		return 'red';
 	}
 	return undefined;
 }
 
-function getRowTagSuffix(row: AppRow): string {
-	return row.tags.includes('main') ? ' [root]' : '';
-}
 
 function truncateLabel(value: string, width: number): string {
 	if (value.length <= width) {
@@ -49,16 +40,6 @@ function truncateLabel(value: string, width: number): string {
 	return `${value.slice(0, Math.max(width - 1, 0))}…`;
 }
 
-function getScrollbarThumbRows(totalLines: number, viewportHeight: number, scrollOffset: number): Set<number> {
-	if (totalLines <= viewportHeight) {
-		return new Set();
-	}
-
-	const thumbSize = Math.max(1, Math.floor((viewportHeight / totalLines) * viewportHeight));
-	const maxScrollOffset = Math.max(1, totalLines - viewportHeight);
-	const thumbStart = Math.round((scrollOffset / maxScrollOffset) * (viewportHeight - thumbSize));
-	return new Set(Array.from({length: thumbSize}, (_, index) => thumbStart + index));
-}
 
 export function WorktreeList({
 	rows,
@@ -76,10 +57,10 @@ export function WorktreeList({
 	scrollOffset?: number;
 }) {
 	const branchWidth = Math.max(MIN_BRANCH_WIDTH, (width ?? 34) - 7);
-	const contentViewportHeight = height === undefined ? rows.length : Math.max(1, height - 3);
-	const maxScrollOffset = Math.max(0, rows.length - contentViewportHeight);
-	const effectiveScrollOffset = Math.min(Math.max(scrollOffset, 0), maxScrollOffset);
-	const visibleRows = rows.slice(effectiveScrollOffset, effectiveScrollOffset + contentViewportHeight);
+	const viewport = sliceListViewport(rows, height === undefined ? rows.length : height - 3, scrollOffset);
+	const contentViewportHeight = viewport.viewportHeight;
+	const effectiveScrollOffset = viewport.scrollOffset;
+	const visibleRows = viewport.visibleItems;
 	const showScrollbar = height !== undefined && rows.length > contentViewportHeight;
 	const scrollbarThumbRows = showScrollbar ? getScrollbarThumbRows(rows.length, contentViewportHeight, effectiveScrollOffset) : new Set<number>();
 
@@ -100,17 +81,19 @@ export function WorktreeList({
 			</Text>
 			{visibleRows.map((row, index) => {
 				const isSelected = index + effectiveScrollOffset === selectedIndex;
-				const suffix = getRowTagSuffix(row);
+				const projection = projectWorktreeListRow(row, isSelected);
+				const tagSuffix = projection.isMain ? ' [root]' : '';
+				const color = getRowColor(projection);
 				const branchText = sanitizeInlineText(row.branch);
-				const line = `${isSelected ? '>' : ' '} ${getIndicator(row)} ${truncateLabel(branchText, Math.max(1, branchWidth - suffix.length))}${suffix}`;
+				const line = `${isSelected ? '>' : ' '} ${getIndicator(projection.state)} ${truncateLabel(branchText, Math.max(1, branchWidth - tagSuffix.length))}${tagSuffix}`;
 				return (
 					<Box key={row.path} flexDirection="row">
 						<Box flexGrow={1} flexShrink={1}>
 							<Text
 								key={row.path}
-								color={getRowColor(row, isSelected)}
-								dimColor={!isSelected && getRowColor(row, isSelected) === undefined}
-								bold={row.tags.includes('active')}
+								color={color}
+								dimColor={!isSelected && color === undefined}
+								bold={projection.state === 'active'}
 								wrap="truncate-end"
 							>
 								{line}

@@ -8,7 +8,7 @@ import {HelpWindow} from './components/HelpWindow.js';
 import {FloatingLogWindow} from './components/FloatingLogWindow.js';
 import {LogPanel, buildLogLines} from './components/LogPanel.js';
 import {WorktreeList} from './components/WorktreeList.js';
-import type {AppActions, AppModel, AppStatus} from './core/runtime.js';
+import type {AppActions, AppModel, AppRow, AppStatus, RowTag} from './core/runtime.js';
 
 export interface ShellDimensions {
 	rootWidth: number;
@@ -97,6 +97,29 @@ function getLogPaneHeight(_rootHeight: number): number {
 	return 9;
 }
 
+const ACTIVE_TAG: RowTag = 'active';
+const ALREADY_ACTIVE_MESSAGE = 'already active';
+
+
+function syncActiveTags(rows: AppRow[], activePath: string | null): AppRow[] {
+	let changed = false;
+	const nextRows = rows.map(row => {
+		const isActive = row.path === activePath;
+		const hasActiveTag = row.tags.includes(ACTIVE_TAG);
+		if (isActive === hasActiveTag) {
+			return row;
+		}
+
+		changed = true;
+		return {
+			...row,
+			tags: isActive ? [...row.tags, ACTIVE_TAG] : row.tags.filter(tag => tag !== ACTIVE_TAG),
+		};
+	});
+	return changed ? nextRows : rows;
+}
+
+
 export function App({
 	initialModel,
 	actions,
@@ -120,9 +143,8 @@ export function App({
 	const [isHelpOverlayOpen, setIsHelpOverlayOpen] = useState(false);
 	const [completedAlert, setCompletedAlert] = useState<string | null>(null);
 	const userActionInFlightRef = useRef(false);
-	const backgroundRefreshInFlightRef = useRef(false);
-	const actionGenerationRef = useRef(0);
 	const logRefreshInFlightRef = useRef(false);
+	const actionGenerationRef = useRef(0);
 	const previousStatusRef = useRef<AppStatus['kind']>(initialModel.status.kind);
 	const alertTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -165,24 +187,41 @@ export function App({
 	}, []);
 
 	useEffect(() => {
-		if (model.status.kind !== 'running') {
+		if (model.activePath === null || (model.status.kind !== 'running' && model.status.message !== ALREADY_ACTIVE_MESSAGE)) {
 			return;
 		}
-
-		const fullRefreshInterval = setInterval(() => {
-			if (userActionInFlightRef.current || backgroundRefreshInFlightRef.current) {
-				return;
-			}
-			void apply(() => actions.refresh(), {blocksInput: false});
-		}, 1500);
+		// Only logs and active-session liveness need near-real-time updates.
+		// Full worktree metadata includes GitHub PR lookups and is refreshed by
+		// explicit user actions instead of a tight polling loop.
 		const logRefreshInterval = setInterval(() => {
-			if (userActionInFlightRef.current || backgroundRefreshInFlightRef.current || logRefreshInFlightRef.current) {
+			if (userActionInFlightRef.current || logRefreshInFlightRef.current) {
 				return;
 			}
+
+			const generation = actionGenerationRef.current;
 			logRefreshInFlightRef.current = true;
 			void actions.refreshLogs()
-				.then(logs => {
-					setModel(current => ({...current, logs}));
+				.then(refresh => {
+					if (generation !== actionGenerationRef.current || userActionInFlightRef.current) {
+						return;
+					}
+
+					setModel(current => {
+						const activeChanged = current.activePath !== refresh.activePath || current.activeBranch !== refresh.activeBranch;
+						const status = current.status.kind === 'running' && activeChanged
+							? refresh.activePath === null
+								? {kind: 'idle' as const, message: 'session ended'}
+								: {kind: 'running' as const, message: refresh.activeBranch ? `Active: ${refresh.activeBranch}` : 'running'}
+							: current.status;
+						return {
+							...current,
+							logs: refresh.logs,
+							activePath: refresh.activePath,
+							activeBranch: refresh.activeBranch,
+							status,
+							rows: activeChanged ? syncActiveTags(current.rows, refresh.activePath) : current.rows,
+						};
+					});
 				})
 				.catch(() => {})
 				.finally(() => {
@@ -191,10 +230,9 @@ export function App({
 		}, 400);
 
 		return () => {
-			clearInterval(fullRefreshInterval);
 			clearInterval(logRefreshInterval);
 		};
-	}, [actions, model.status.kind]);
+	}, [actions, model.activePath, model.status.kind, model.status.message]);
 
 	const selectedIndex = useMemo(() => {
 		if (selectedPath === null) {
@@ -238,41 +276,27 @@ export function App({
 		setCompletedAlert(null);
 	}
 
-	function invalidateBackgroundRefreshes(): void {
+	function invalidateStaleLogRefreshes(): void {
 		actionGenerationRef.current += 1;
 	}
 
-	async function apply(action: () => Promise<AppModel>, options: {blocksInput?: boolean} = {}) {
-		const blocksInput = options.blocksInput ?? true;
-		const generation = blocksInput ? actionGenerationRef.current + 1 : actionGenerationRef.current;
-		if (blocksInput) {
-			actionGenerationRef.current = generation;
-			userActionInFlightRef.current = true;
-		} else {
-			backgroundRefreshInFlightRef.current = true;
-		}
+
+	async function apply(action: () => Promise<AppModel>) {
+		invalidateStaleLogRefreshes();
+		userActionInFlightRef.current = true;
 
 		try {
-			const next = await action();
-			if (blocksInput || (generation === actionGenerationRef.current && !userActionInFlightRef.current)) {
-				setModel(next);
-			}
+			setModel(await action());
 		} catch (error) {
-			if (blocksInput || (generation === actionGenerationRef.current && !userActionInFlightRef.current)) {
-				setModel(current => ({
-					...current,
-					status: {
-						kind: 'error',
-						message: error instanceof Error ? error.message : String(error),
-					},
-				}));
-			}
+			setModel(current => ({
+				...current,
+				status: {
+					kind: 'error',
+					message: error instanceof Error ? error.message : String(error),
+				},
+			}));
 		} finally {
-			if (blocksInput) {
-				userActionInFlightRef.current = false;
-			} else {
-				backgroundRefreshInFlightRef.current = false;
-			}
+			userActionInFlightRef.current = false;
 		}
 	}
 
@@ -367,14 +391,14 @@ export function App({
 		}
 		if (key.return && selected) {
 			if (selected.invalidReason) {
-				invalidateBackgroundRefreshes();
+				invalidateStaleLogRefreshes();
 				setModel(current => ({...current, status: {kind: 'error', message: selected.invalidReason!}}));
 				clearTransientAlert();
 				return;
 			}
 			if (selected.path === model.activePath) {
-				invalidateBackgroundRefreshes();
-				setModel(current => ({...current, status: {kind: 'idle', message: 'already active'}}));
+				invalidateStaleLogRefreshes();
+				setModel(current => ({...current, status: {kind: 'idle', message: ALREADY_ACTIVE_MESSAGE}}));
 				clearTransientAlert();
 				return;
 			}

@@ -46,12 +46,19 @@ export interface AppModel {
 	logs: AppLogEntry[];
 }
 
+export interface AppLogRefresh {
+	logs: AppLogEntry[];
+	activePath: string | null;
+	activeBranch: string | null;
+}
+
+
 export interface AppActions {
 	setup: (worktreePath: string) => Promise<AppModel>;
 	start: (worktreePath: string) => Promise<AppModel>;
 	stop: () => Promise<AppModel>;
 	refresh: () => Promise<AppModel>;
-	refreshLogs: () => Promise<AppLogEntry[]>;
+	refreshLogs: () => Promise<AppLogRefresh>;
 }
 
 
@@ -175,9 +182,13 @@ export async function buildActions(cwd: string): Promise<AppActions> {
 	const paths = getSessionPaths(gitCommonDir, config.namespace);
 
 	const refresh = async (): Promise<AppModel> => buildInitialModel(cwd);
-	const refreshLogs = async (): Promise<AppLogEntry[]> => {
+	const refreshLogs = async (): Promise<AppLogRefresh> => {
 		const active = await readSessionRecord(paths, {isSessionAlive: isProcessGroupAlive});
-		return readLogs(paths.logsDir, active?.logPath ?? null);
+		return {
+			logs: await readLogs(paths.logsDir, active?.logPath ?? null),
+			activePath: active?.worktreePath ?? null,
+			activeBranch: active?.branch ?? null,
+		};
 	};
 
 	const stop = async (): Promise<AppModel> => {

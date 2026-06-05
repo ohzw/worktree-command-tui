@@ -16,6 +16,10 @@ function getTagColor(tag: string): 'green' | 'yellow' | 'blue' | 'red' | 'magent
 	}
 	return 'magenta';
 }
+function getTagLabel(tag: string): string {
+	return tag === 'main' ? 'root' : tag;
+}
+
 
 export function getActionVariant(selectedRow: AppRow, activePath: string | null): 'success' | 'error' | 'info' {
 	if (selectedRow.invalidReason) {
@@ -239,7 +243,7 @@ function getPanelLines(selectedRow: AppRow | undefined, activePath: string | nul
 
 	if (showTags) {
 		for (const tag of getOrderedTags(selectedRow.tags.filter(tag => tag !== 'active'))) {
-			lines.push({text: tag.toUpperCase(), color: getTagColor(tag)});
+			lines.push({text: getTagLabel(tag).toUpperCase(), color: getTagColor(tag)});
 		}
 	}
 

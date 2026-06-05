@@ -22,13 +22,10 @@ function getIndicator(row: AppRow): string {
 	if (row.tags.includes('external')) {
 		return '^';
 	}
-	if (row.tags.includes('main')) {
-		return '#';
-	}
 	return '-';
 }
 
-function getRowColor(row: AppRow, isSelected: boolean): 'cyan' | 'green' | 'red' | 'yellow' | 'blue' | undefined {
+function getRowColor(row: AppRow, isSelected: boolean): 'cyan' | 'green' | 'red' | 'yellow' | undefined {
 	if (row.tags.includes('active')) {
 		return 'green';
 	}
@@ -41,10 +38,11 @@ function getRowColor(row: AppRow, isSelected: boolean): 'cyan' | 'green' | 'red'
 	if (row.tags.includes('external')) {
 		return 'yellow';
 	}
-	if (row.tags.includes('main')) {
-		return 'blue';
-	}
 	return undefined;
+}
+
+function getRowTagSuffix(row: AppRow): string {
+	return row.tags.includes('main') ? ' [root]' : '';
 }
 
 function truncateLabel(value: string, width: number): string {
@@ -105,7 +103,9 @@ export function WorktreeList({
 			</Text>
 			{visibleRows.map((row, index) => {
 				const isSelected = index + effectiveScrollOffset === selectedIndex;
-				const line = `${isSelected ? '>' : ' '} ${getIndicator(row)} ${truncateLabel(sanitizeInlineText(row.branch), branchWidth)}`;
+				const suffix = getRowTagSuffix(row);
+				const branchText = sanitizeInlineText(row.branch);
+				const line = `${isSelected ? '>' : ' '} ${getIndicator(row)} ${truncateLabel(branchText, Math.max(1, branchWidth - suffix.length))}${suffix}`;
 				return (
 					<Box key={row.path} flexDirection="row">
 						<Box flexGrow={1} flexShrink={1}>

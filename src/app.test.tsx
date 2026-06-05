@@ -244,6 +244,7 @@ it('stacks panes responsively on medium-width terminals when there is enough ver
 	);
 	expect(lastFrame()).toContain('Worktrees');
 	expect(lastFrame()).toContain('Selection / Action');
+	expect(lastFrame()).toContain('> - develop [root]');
 });
 
 it('shows more stacked worktree rows as terminal height grows', () => {

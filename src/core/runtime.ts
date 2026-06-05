@@ -1,48 +1,18 @@
 import path from 'node:path';
-import {execFile} from 'node:child_process';
-import {readdir, readFile, stat} from 'node:fs/promises';
-import {promisify} from 'node:util';
 import {loadToolConfig} from './config.js';
 import {readWorktrees, sortWorktrees, toShortPath, type WorktreeRow} from './git-worktrees.js';
+import {readGitStatusSummary, readBranchCreatedAtMs, resolveRepoContext, type UpstreamInfo, type WorkingTreeInfo} from './git-metadata.js';
+import {readPullRequestInfo, type PullRequestInfo} from './github-metadata.js';
+import {readLogs, type LogEntry} from './log-reader.js';
 import {getInvalidReason} from './validation.js';
 import {getSessionPaths, readSessionRecord, writeSessionRecord, clearSessionRecord} from './session-store.js';
 import {runCommandToLog, startDetachedCommand} from './command-runner.js';
 import {stopSessionWithFallback} from './process-control.js';
 import {isProcessGroupAlive, killProcessGroup, killPortOwner, killOrphans} from './posix-process.js';
 
-const execFileAsync = promisify(execFile);
 const SHORT_SHA_LENGTH = 8;
-const GH_TIMEOUT_MS = 2500;
-const MAX_LOG_BYTES = 16 * 1024;
-const MAX_LOG_LINES = 120;
 
 export type RowTag = 'main' | 'active' | 'invalid' | 'external' | 'legacy';
-
-export interface UpstreamInfo {
-	branch: string;
-	ahead: number;
-	behind: number;
-}
-
-export interface WorkingTreeInfo {
-	staged: number;
-	unstaged: number;
-	untracked: number;
-	conflicts: number;
-}
-
-export type PullRequestInfo =
-	| {
-		kind: 'found';
-		number: number;
-		title: string;
-		url: string;
-		state: 'OPEN' | 'CLOSED' | 'MERGED';
-		isDraft: boolean;
-		baseBranch: string;
-	}
-	| {kind: 'none'}
-	| {kind: 'unavailable'};
 
 export interface AppRow {
 	path: string;
@@ -63,11 +33,7 @@ export interface AppStatus {
 	message: string;
 }
 
-export interface AppLogEntry {
-	name: string;
-	path: string;
-	content: string;
-}
+export type AppLogEntry = LogEntry;
 
 export interface AppModel {
 	repoName: string;
@@ -88,253 +54,9 @@ export interface AppActions {
 	refreshLogs: () => Promise<AppLogEntry[]>;
 }
 
-interface RepoContext {
-	workspaceRoot: string;
-	mainWorktreePath: string;
-	gitCommonDir: string;
-}
-
-interface GitStatusSummary {
-	upstream?: UpstreamInfo;
-	upstreamUnavailable: boolean;
-	workingTree?: WorkingTreeInfo;
-}
-
-interface GitHubRepository {
-	host: string;
-	owner: string;
-	name: string;
-}
 
 function shortenSha(headSha: string): string {
 	return headSha.slice(0, SHORT_SHA_LENGTH);
-}
-
-function createEmptyWorkingTree(): WorkingTreeInfo {
-	return {staged: 0, unstaged: 0, untracked: 0, conflicts: 0};
-}
-
-export function parseGitStatusSummary(output: string): GitStatusSummary {
-	const workingTree = createEmptyWorkingTree();
-	let upstreamBranch: string | undefined;
-	let ahead = 0;
-	let behind = 0;
-
-	for (const line of output.split('\n')) {
-		if (line.startsWith('# branch.upstream ')) {
-			upstreamBranch = line.slice('# branch.upstream '.length).trim();
-			continue;
-		}
-		if (line.startsWith('# branch.ab ')) {
-			const match = /# branch\.ab \+(\d+) -(\d+)/.exec(line);
-			ahead = Number(match?.[1] ?? 0);
-			behind = Number(match?.[2] ?? 0);
-			continue;
-		}
-		if (line.startsWith('1 ') || line.startsWith('2 ')) {
-			const [, xy = '..'] = line.split(' ', 3);
-			if (xy[0] !== '.') {
-				workingTree.staged += 1;
-			}
-			if (xy[1] !== '.') {
-				workingTree.unstaged += 1;
-			}
-			continue;
-		}
-		if (line.startsWith('u ')) {
-			workingTree.conflicts += 1;
-			continue;
-		}
-		if (line.startsWith('? ')) {
-			workingTree.untracked += 1;
-		}
-	}
-
-	return {
-		upstream: upstreamBranch ? {branch: upstreamBranch, ahead, behind} : undefined,
-		upstreamUnavailable: false,
-		workingTree,
-	};
-}
-
-async function readGitStatusSummary(cwd: string): Promise<GitStatusSummary> {
-	try {
-		const {stdout} = await execFileAsync('git', ['status', '--branch', '--porcelain=v2'], {cwd});
-		return parseGitStatusSummary(stdout);
-	} catch {
-		return {upstreamUnavailable: true};
-	}
-}
-
-function parseGitHubRepositoryFromRemoteUrl(remoteUrl: string): GitHubRepository | null {
-	const trimmedUrl = remoteUrl.trim();
-	if (!trimmedUrl) {
-		return null;
-	}
-
-	try {
-		let host: string;
-		let repoPath: string;
-		if (trimmedUrl.includes('://')) {
-			const parsedUrl = new URL(trimmedUrl);
-			host = parsedUrl.hostname.toLowerCase();
-			repoPath = parsedUrl.pathname;
-		} else {
-			const scpMatch = /^(?:[^@]+@)?([^:]+):(.+)$/.exec(trimmedUrl);
-			if (!scpMatch) {
-				return null;
-			}
-			host = scpMatch[1]!.toLowerCase();
-			repoPath = scpMatch[2]!;
-		}
-
-		const segments = repoPath
-			.replace(/\.git$/, '')
-			.replace(/^\/+/, '')
-			.replace(/\/+$/, '')
-			.split('/')
-			.filter(Boolean);
-		if (segments.length < 2) {
-			return null;
-		}
-		return {host, owner: segments[0]!, name: segments[1]!};
-	} catch {
-		return null;
-	}
-}
-
-async function readGitHubRepository(cwd: string): Promise<GitHubRepository> {
-	const {stdout} = await execFileAsync('git', ['config', '--get', 'remote.origin.url'], {cwd});
-	const repository = parseGitHubRepositoryFromRemoteUrl(stdout);
-	if (!repository) {
-		throw new Error('GitHub repository remote unavailable');
-	}
-	return repository;
-}
-
-
-async function readPullRequestList(
-	cwd: string,
-	branch: string,
-	state: 'all' | 'open',
-): Promise<Array<{
-	number: number;
-	title: string;
-	url: string;
-	state: 'OPEN' | 'CLOSED' | 'MERGED';
-	isDraft: boolean;
-	baseRefName: string;
-}>> {
-	const repository = await readGitHubRepository(cwd);
-	const args = [
-		'api',
-		'-X',
-		'GET',
-		`repos/${repository.owner}/${repository.name}/pulls`,
-		'-f',
-		`state=${state}`,
-		'-f',
-		`head=${repository.owner}:${branch}`,
-		'-F',
-		'per_page=1',
-	];
-	if (repository.host !== 'github.com' && repository.host !== 'www.github.com') {
-		args.push('--hostname', repository.host);
-	}
-
-	const {stdout} = await execFileAsync('gh', args, {cwd, timeout: GH_TIMEOUT_MS});
-	const payload = JSON.parse(stdout) as unknown;
-	if (!Array.isArray(payload)) {
-		throw new Error('GitHub REST API returned unexpected payload');
-	}
-
-	return payload.map(item => {
-		if (typeof item !== 'object' || item === null) {
-			return null;
-		}
-		const pr = item as {
-			number?: unknown;
-			title?: unknown;
-			html_url?: unknown;
-			state?: unknown;
-			draft?: unknown;
-			merged_at?: unknown;
-			base?: {ref?: unknown};
-		};
-		const number = typeof pr.number === 'number' ? pr.number : NaN;
-		const title = typeof pr.title === 'string' ? pr.title : '';
-		const url = typeof pr.html_url === 'string' ? pr.html_url : '';
-		const isDraft = typeof pr.draft === 'boolean' ? pr.draft : false;
-		const baseRefName = typeof pr.base?.ref === 'string' ? pr.base.ref : '';
-		const mergedAt = typeof pr.merged_at === 'string' ? pr.merged_at : null;
-		const normalizedState = typeof pr.state === 'string' && pr.state.toUpperCase() === 'OPEN'
-			? 'OPEN'
-			: mergedAt ? 'MERGED' : 'CLOSED';
-
-		if (!Number.isFinite(number) || !title || !url || !baseRefName) {
-			return null;
-		}
-
-		return {
-			number,
-			title,
-			url,
-			state: normalizedState,
-			isDraft,
-			baseRefName,
-		};
-	}).filter((item): item is {
-		number: number;
-		title: string;
-		url: string;
-		state: 'OPEN' | 'CLOSED' | 'MERGED';
-		isDraft: boolean;
-		baseRefName: string;
-	} => item !== null);
-}
-async function readPullRequestInfo(cwd: string, branch: string): Promise<PullRequestInfo> {
-	if (branch.startsWith('(')) {
-		return {kind: 'none'};
-	}
-
-	try {
-		const openPullRequests = await readPullRequestList(cwd, branch, 'open');
-		const parsed = openPullRequests.length > 0 ? openPullRequests : await readPullRequestList(cwd, branch, 'all');
-		const pr = parsed[0];
-		if (!pr) {
-			return {kind: 'none'};
-		}
-		return {
-			kind: 'found',
-			number: pr.number,
-			title: pr.title,
-			url: pr.url,
-			state: pr.state,
-			isDraft: pr.isDraft,
-			baseBranch: pr.baseRefName,
-		};
-	} catch {
-		return {kind: 'unavailable'};
-	}
-}
-
-async function readBranchCreatedAtMs(cwd: string, branch: string): Promise<number | null> {
-	if (branch.startsWith('(')) {
-		return null;
-	}
-
-	try {
-		const {stdout} = await execFileAsync('git', ['reflog', 'show', '--format=%ct', `refs/heads/${branch}`], {cwd});
-		const trimmed = stdout.trim();
-		if (trimmed.length === 0) {
-			return null;
-		}
-		const timestamps = trimmed.split('\n');
-		const firstTimestampSeconds = Number(timestamps.at(-1));
-		return Number.isFinite(firstTimestampSeconds) ? firstTimestampSeconds * 1000 : null;
-	} catch {
-		return null;
-	}
 }
 
 async function readRowMetadata(
@@ -353,17 +75,6 @@ async function readRowMetadata(
 		pullRequest,
 		branchCreatedAtMs: branchCreatedAtMs ?? undefined,
 	};
-}
-
-async function resolveRepoContext(cwd: string): Promise<RepoContext> {
-	const [{stdout: workspaceRootRaw}, {stdout: gitCommonDirRaw}] = await Promise.all([
-		execFileAsync('git', ['rev-parse', '--show-toplevel'], {cwd}),
-		execFileAsync('git', ['rev-parse', '--git-common-dir'], {cwd}),
-	]);
-	const workspaceRoot = workspaceRootRaw.trim();
-	const gitCommonDir = path.resolve(workspaceRoot, gitCommonDirRaw.trim());
-	const mainWorktreePath = path.dirname(gitCommonDir);
-	return {workspaceRoot, mainWorktreePath, gitCommonDir};
 }
 
 export function toAppRow(
@@ -402,7 +113,12 @@ export function toAppRow(
 	};
 }
 
-async function buildRows(mainWorktreePath: string, workspaceRoot: string, activePath: string | null, requiredFiles: string[]): Promise<AppRow[]> {
+async function buildRows(
+	mainWorktreePath: string,
+	workspaceRoot: string,
+	activePath: string | null,
+	requiredFiles: string[],
+): Promise<AppRow[]> {
 	const worktrees = sortWorktrees(await readWorktrees(workspaceRoot, mainWorktreePath), activePath);
 	const rows = await Promise.all(
 		worktrees.map(async worktree => {
@@ -436,52 +152,6 @@ async function stopRecordedSession(
 	}
 }
 
-function tailLogContent(content: string): string {
-	const byteTrimmed = content.length > MAX_LOG_BYTES ? content.slice(-MAX_LOG_BYTES) : content;
-	const lines = byteTrimmed.replace(/\r\n/g, '\n').split('\n');
-	const tailLines = lines.length > MAX_LOG_LINES ? lines.slice(-MAX_LOG_LINES) : lines;
-	return tailLines.join('\n').trimEnd();
-}
-
-async function readLogs(logsDir: string, activeLogPath: string | null): Promise<AppLogEntry[]> {
-	try {
-		const entries = (await readdir(logsDir, {withFileTypes: true}))
-			.filter(entry => entry.isFile() && entry.name.endsWith('.log'))
-			.map(entry => ({name: entry.name, path: path.join(logsDir, entry.name)}));
-
-		if (entries.length === 0) {
-			return [];
-		}
-
-		let selectedEntries = entries;
-		if (activeLogPath !== null) {
-			const activeEntry = entries.find(entry => entry.path === activeLogPath);
-			if (activeEntry) {
-				selectedEntries = [activeEntry];
-			}
-		} else {
-			const withStats = await Promise.all(
-				entries.map(async entry => ({
-					...entry,
-					mtimeMs: (await stat(entry.path)).mtimeMs,
-				})),
-			);
-			withStats.sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name));
-			selectedEntries = [withStats[0]!];
-		}
-
-		return await Promise.all(
-			selectedEntries.map(async entry => ({
-				name: entry.name,
-				path: entry.path,
-				content: tailLogContent(await readFile(entry.path, 'utf8')),
-			})),
-		);
-	} catch {
-		return [];
-	}
-}
-
 export async function buildInitialModel(cwd: string): Promise<AppModel> {
 	const {workspaceRoot, mainWorktreePath, gitCommonDir} = await resolveRepoContext(cwd);
 	const config = await loadToolConfig({repoRoot: workspaceRoot});
@@ -500,10 +170,9 @@ export async function buildInitialModel(cwd: string): Promise<AppModel> {
 }
 
 export async function buildActions(cwd: string): Promise<AppActions> {
-	const {workspaceRoot, gitCommonDir} = await resolveRepoContext(cwd);
+	const {workspaceRoot, gitCommonDir, mainWorktreePath} = await resolveRepoContext(cwd);
 	const config = await loadToolConfig({repoRoot: workspaceRoot});
 	const paths = getSessionPaths(gitCommonDir, config.namespace);
-	const mainWorktreePath = path.dirname(gitCommonDir);
 
 	const refresh = async (): Promise<AppModel> => buildInitialModel(cwd);
 	const refreshLogs = async (): Promise<AppLogEntry[]> => {

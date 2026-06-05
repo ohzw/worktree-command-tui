@@ -104,10 +104,12 @@ export async function buildDefaultConfig(repoRoot: string): Promise<ToolConfig> 
 	const packageJson = await readPackageJson(repoRoot);
 	const packageManager = await detectPackageManager(repoRoot, packageJson);
 	const command = [packageManager, 'run', selectDefaultScript(packageJson?.scripts)];
+	const setupCommand = [packageManager, 'install'];
 	const namespaceSeed = packageJson?.name ?? path.basename(repoRoot);
 	return {
 		namespace: toSafeNamespace(namespaceSeed),
 		command,
+		setupCommand,
 		port: 3000,
 		requiredFiles: ['package.json'],
 		orphanMatchers: [],
@@ -116,6 +118,11 @@ export async function buildDefaultConfig(repoRoot: string): Promise<ToolConfig> 
 }
 
 export function renderConfigJsonc(config: ToolConfig): string {
+	const setupCommandSection = config.setupCommand === undefined ? '' : `
+  // Optional command run manually with the setup key in the selected worktree.
+  // Useful for first-time dependency installation without doing it on every switch.
+  "setupCommand": ${JSON.stringify(config.setupCommand)},
+`;
 	return `{
   // Session namespace used for git-common-dir state files and logs.
   // Keep this filesystem-safe: letters, numbers, dots, underscores, and hyphens only.
@@ -124,7 +131,7 @@ export function renderConfigJsonc(config: ToolConfig): string {
   // Command launched in the selected worktree.
   // Use argv form so spaces and shell metacharacters are passed safely.
   "command": ${JSON.stringify(config.command)},
-
+${setupCommandSection}
   // TCP port owned by the command, used when stopping stale/orphaned processes.
   "port": ${JSON.stringify(config.port)},
 

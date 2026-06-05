@@ -13,6 +13,7 @@ describe('loadToolConfig', () => {
 				// Process/session namespace.
 				"namespace": "rojo-serve",
 				"command": ["npm", "run", "serve"],
+				"setupCommand": ["npm", "install"],
 				"port": 34872,
 				"requiredFiles": ["package.json", "default.project.json"],
 				"orphanMatchers": ["rbxtsc -w"],
@@ -22,6 +23,7 @@ describe('loadToolConfig', () => {
 		const config = await loadToolConfig({repoRoot: root});
 		expect(config.namespace).toBe('rojo-serve');
 		expect(config.command).toEqual(['npm', 'run', 'serve']);
+		expect(config.setupCommand).toEqual(['npm', 'install']);
 		expect(config.port).toBe(34872);
 	});
 
@@ -49,6 +51,16 @@ describe('loadToolConfig', () => {
 		);
 
 		await expect(loadToolConfig({repoRoot: root})).rejects.toThrow('command must be a non-empty string array');
+	});
+
+	it('throws a readable error when setupCommand is not a non-empty argv array', async () => {
+		const root = mkdtempSync(path.join(tmpdir(), 'wctui-config-bad-setup-'));
+		writeFileSync(
+			path.join(root, CONFIG_FILE_NAME),
+			JSON.stringify({namespace: 'rojo-serve', command: ['npm', 'run', 'serve'], setupCommand: [], port: 34872}),
+		);
+
+		await expect(loadToolConfig({repoRoot: root})).rejects.toThrow('setupCommand must be a non-empty string array when set');
 	});
 
 	it('rejects namespace values that escape the namespace slot', async () => {

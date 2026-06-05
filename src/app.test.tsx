@@ -8,6 +8,7 @@ import {APP_RENDER_OPTIONS} from './render-options.js';
 function makeFakeActions(result: AppModel): AppActions {
 	return {
 		start: vi.fn(async () => result),
+		setup: vi.fn(async () => result),
 		stop: vi.fn(async () => result),
 		refresh: vi.fn(async () => result),
 		refreshLogs: vi.fn(async () => result.logs),
@@ -26,6 +27,7 @@ function createModel(overrides: Partial<AppModel> = {}): AppModel {
 		activePath: '/repo/.worktree/feat-a',
 		activeBranch: 'feat/a',
 		status: {kind: 'idle', message: 'ready'},
+		setupAvailable: false,
 		logs: [
 			{name: 'feat-a.log', path: '/repo/.git/worktree-command-tui/logs/feat-a.log', content: 'ready\nserver started'},
 		],
@@ -411,6 +413,16 @@ it('renders a minimal fallback shell on very short terminals', () => {
 	expect(lastFrame()).toContain('↑↓jk↵Lq');
 });
 
+it('shows setup shortcut in the minimal shell only when setup is configured', () => {
+	const base = createModel({rows: [{path: '/repo', shortPath: '.', branch: 'develop', tags: ['main']}], activePath: '/repo', activeBranch: 'develop'});
+	const withoutSetup = render(<App initialModel={base} actions={makeFakeActions(base)} windowSizeOverride={{columns: 30, rows: 8}} />);
+	expect(withoutSetup.lastFrame()).toContain('↑↓jk↵Lq');
+
+	const withSetup = createModel({...base, setupAvailable: true});
+	const withSetupRender = render(<App initialModel={withSetup} actions={makeFakeActions(withSetup)} windowSizeOverride={{columns: 30, rows: 8}} />);
+	expect(withSetupRender.lastFrame()).toContain('↑↓jk↵iLq');
+});
+
 it('shows completion alert after starting a worktree', async () => {
 	const model = createModel({
 		rows: [{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: []}],
@@ -734,6 +746,61 @@ it('treats selecting the already-active worktree as a no-op refresh', async () =
 	await waitForInput();
 	expect(start).not.toHaveBeenCalled();
 	expect(lastFrame()).toContain('already active');
+});
+
+it('runs setup command for the selected worktree when i is pressed', async () => {
+	const model = createModel({
+		rows: [{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: []}],
+		activePath: null,
+		activeBranch: null,
+		setupAvailable: true,
+	});
+	const setupResult = {...model, status: {kind: 'idle' as const, message: 'setup complete for feat/a'}};
+	const setup = vi.fn(async () => setupResult);
+	const {lastFrame, stdin} = render(<App initialModel={model} actions={{...makeFakeActions(model), setup}} windowSizeOverride={{columns: 120, rows: 30}} />);
+	stdin.write('i');
+	await waitForInput();
+	await waitForInput();
+	await waitForInput();
+	expect(setup).toHaveBeenCalledWith('/repo/.worktree/feat-a');
+	expect(lastFrame()).toContain('setup complete for feat/a');
+});
+
+it('ignores setup key when setupCommand is not configured', async () => {
+	const model = createModel({
+		rows: [{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: []}],
+		activePath: null,
+		activeBranch: null,
+		setupAvailable: false,
+	});
+	const setup = vi.fn();
+	const {lastFrame, stdin} = render(<App initialModel={model} actions={{...makeFakeActions(model), setup}} windowSizeOverride={{columns: 120, rows: 30}} />);
+	stdin.write('i');
+	await waitForInput();
+	expect(setup).not.toHaveBeenCalled();
+	expect(lastFrame()).toContain('Ready to launch with the configured command in this worktree.');
+	expect(lastFrame()).not.toContain('i setup');
+	expect(lastFrame()).not.toContain('↵ i');
+});
+
+it('starts without running setup when enter is pressed and setup is available', async () => {
+	const model = createModel({
+		rows: [{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: []}],
+		activePath: null,
+		activeBranch: null,
+		setupAvailable: true,
+	});
+	const started = {...model, activePath: '/repo/.worktree/feat-a', activeBranch: 'feat/a', status: {kind: 'running' as const, message: 'started feat/a'}};
+	const setup = vi.fn(async () => model);
+	const start = vi.fn(async () => started);
+	const {lastFrame, stdin} = render(<App initialModel={model} actions={{...makeFakeActions(model), setup, start}} windowSizeOverride={{columns: 120, rows: 30}} />);
+	stdin.write('\r');
+	await waitForInput();
+	await waitForInput();
+	await waitForInput();
+	expect(start).toHaveBeenCalledWith('/repo/.worktree/feat-a');
+	expect(setup).not.toHaveBeenCalled();
+	expect(lastFrame()).toContain('Active: feat/a');
 });
 
 it('keeps already-active enter feedback when a background refresh completes', async () => {

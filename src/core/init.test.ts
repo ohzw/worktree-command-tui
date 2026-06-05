@@ -2,7 +2,7 @@ import {describe, expect, it} from 'vitest';
 import {accessSync, mkdtempSync, readFileSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
-import {parseInitArgs, runInit} from './init.js';
+import {parseInitArgs, renderConfigJsonc, runInit} from './init.js';
 import {CONFIG_FILE_NAME, LEGACY_CONFIG_FILE_NAME, parseJsonc} from './config.js';
 
 describe('runInit', () => {
@@ -26,6 +26,7 @@ describe('runInit', () => {
 		expect(written).toMatchObject({
 			namespace: 'example-app',
 			command: ['bun', 'run', 'dev'],
+			setupCommand: ['bun', 'install'],
 			port: 3000,
 			requiredFiles: ['package.json'],
 			orphanMatchers: [],
@@ -45,6 +46,19 @@ describe('runInit', () => {
 		const result = await runInit({workspaceRoot: root, force: true});
 		const written = parseJsonc(readFileSync(result.path, 'utf8')) as Record<string, unknown>;
 		expect((written.command as string[])[2]).toBe('watch');
+	});
+
+	it('omits setupCommand when rendering a config that does not define it', () => {
+		const source = renderConfigJsonc({
+			namespace: 'example-app',
+			command: ['npm', 'run', 'dev'],
+			port: 3000,
+			requiredFiles: ['package.json'],
+			orphanMatchers: [],
+		});
+
+		expect(source).not.toContain('undefined');
+		expect(parseJsonc(source)).not.toHaveProperty('setupCommand');
 	});
 
 	it('refuses to overwrite an existing config without --force', async () => {
@@ -70,6 +84,7 @@ describe('runInit', () => {
 		expect(() => accessSync(configPath)).not.toThrow();
 		const written = readFileSync(configPath, 'utf8');
 		expect(written).toContain('"command"');
+		expect(written).toContain('"setupCommand"');
 	});
 });
 

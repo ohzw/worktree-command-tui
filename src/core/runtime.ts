@@ -6,7 +6,7 @@ import {loadToolConfig} from './config.js';
 import {readWorktrees, sortWorktrees, toShortPath, type WorktreeRow} from './git-worktrees.js';
 import {getInvalidReason} from './validation.js';
 import {getSessionPaths, readSessionRecord, writeSessionRecord, clearSessionRecord} from './session-store.js';
-import {startDetachedCommand} from './command-runner.js';
+import {runCommandToLog, startDetachedCommand} from './command-runner.js';
 import {stopSessionWithFallback} from './process-control.js';
 import {isProcessGroupAlive, killProcessGroup, killPortOwner, killOrphans} from './posix-process.js';
 
@@ -58,7 +58,7 @@ export interface AppRow {
 }
 
 export interface AppStatus {
-	kind: 'idle' | 'starting' | 'running' | 'stopping' | 'error';
+	kind: 'idle' | 'setting-up' | 'starting' | 'running' | 'stopping' | 'error';
 	message: string;
 }
 
@@ -75,10 +75,12 @@ export interface AppModel {
 	activePath: string | null;
 	activeBranch: string | null;
 	status: AppStatus;
+	setupAvailable: boolean;
 	logs: AppLogEntry[];
 }
 
 export interface AppActions {
+	setup: (worktreePath: string) => Promise<AppModel>;
 	start: (worktreePath: string) => Promise<AppModel>;
 	stop: () => Promise<AppModel>;
 	refresh: () => Promise<AppModel>;
@@ -374,6 +376,7 @@ export async function buildInitialModel(cwd: string): Promise<AppModel> {
 		activePath: active?.worktreePath ?? null,
 		activeBranch: active?.branch ?? null,
 		status: active ? {kind: 'running', message: `Active: ${active.branch}`} : {kind: 'idle', message: 'ready'},
+		setupAvailable: config.setupCommand !== undefined,
 		logs: await readLogs(paths.logsDir, active?.logPath ?? null),
 	};
 }
@@ -403,6 +406,48 @@ export async function buildActions(cwd: string): Promise<AppActions> {
 			activePath: null,
 			activeBranch: null,
 			status: {kind: 'idle', message: active ? 'stopped' : 'already stopped'},
+		};
+	};
+
+	const setup = async (worktreePath: string): Promise<AppModel> => {
+		if (config.setupCommand === undefined) {
+			const model = await refresh();
+			return {
+				...model,
+				status: {kind: 'idle', message: 'setup command is not configured'},
+			};
+		}
+
+		const rows = await readWorktrees(workspaceRoot, mainWorktreePath);
+		const selected = rows.find(row => row.path === worktreePath);
+		if (!selected) {
+			throw new Error(`Worktree disappeared: ${worktreePath}`);
+		}
+
+		const logFileBase = `${selected.branch.replace(/[\\/]/g, '-')}.setup`;
+		const setupLogPath = path.join(paths.logsDir, `${logFileBase}.log`);
+		try {
+			await runCommandToLog({
+				command: config.setupCommand,
+				cwd: worktreePath,
+				logsDir: paths.logsDir,
+				logFileBase,
+				errorLabel: 'setup command',
+			});
+		} catch (error) {
+			const model = await refresh();
+			return {
+				...model,
+				status: {kind: 'error', message: error instanceof Error ? error.message : String(error)},
+				logs: await readLogs(paths.logsDir, setupLogPath),
+			};
+		}
+
+		const model = await refresh();
+		return {
+			...model,
+			status: {kind: model.activePath === null ? 'idle' : 'running', message: `setup complete for ${selected.branch}`},
+			logs: await readLogs(paths.logsDir, setupLogPath),
 		};
 	};
 
@@ -460,5 +505,5 @@ export async function buildActions(cwd: string): Promise<AppActions> {
 		};
 	};
 
-	return {start, stop, refresh, refreshLogs};
+	return {setup, start, stop, refresh, refreshLogs};
 }

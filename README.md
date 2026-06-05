@@ -65,6 +65,8 @@ A minimal example of the generated config:
   "namespace": "worktree-command-tui",
   // Command executed in each selected worktree
   "command": ["npm", "run", "start"],
+  // Optional setup command run manually in the selected worktree
+  "setupCommand": ["npm", "install"],
   // Port used for cleanup/monitoring
   "port": 3000,
   // Required files that must exist in a worktree
@@ -73,6 +75,9 @@ A minimal example of the generated config:
   "orphanMatchers": []
 }
 ```
+
+When `setupCommand` is configured, press `i` in the TUI to run it for the selected worktree.
+It is never run automatically when switching worktrees.
 
 ## Development
 

@@ -372,6 +372,12 @@ export function App({
 			void apply(() => actions.stop());
 			return;
 		}
+		if (input === 'i' && selected && model.setupAvailable) {
+			setModel(current => ({...current, status: {kind: 'setting-up', message: `Running setup for ${selected.branch}...`}}));
+			clearTransientAlert();
+			void apply(() => actions.setup(selected.path));
+			return;
+		}
 		if (input === 'r') {
 			clearTransientAlert();
 			void apply(() => actions.refresh());
@@ -495,7 +501,7 @@ export function App({
 				</Text>
 				{rootHeight >= 2 ? <Text wrap="truncate-end">S:{selected?.branch ?? '-'}</Text> : null}
 				{rootHeight >= 3 ? <Text wrap="truncate-end">T:{model.status.kind}</Text> : null}
-				{rootHeight >= 4 ? <Text dimColor wrap="truncate-end">↑↓jk↵Lq</Text> : null}
+				{rootHeight >= 4 ? <Text dimColor wrap="truncate-end">↑↓jk↵{model.setupAvailable ? 'i' : ''}Lq</Text> : null}
 			</Box>
 		);
 	}
@@ -509,13 +515,13 @@ export function App({
 				<Text wrap="truncate-end">Selected: {selected?.branch ?? '-'}</Text>
 				{completedAlert
 					? <Text color="green" wrap="truncate-end">✔ {completedAlert}</Text>
-					: model.status.kind === 'starting' || model.status.kind === 'stopping' ? (
+					: model.status.kind === 'setting-up' || model.status.kind === 'starting' || model.status.kind === 'stopping' ? (
 						<Spinner label={`Status: ${model.status.kind} — ${model.status.message}`} />
 					) : (
 						<Text wrap="truncate-end">Status: {model.status.kind} — {model.status.message}</Text>
 					)}
 				<Text dimColor wrap="truncate-end">
-					Keys: ↑↓/jk g/G ↵ L s r q · Resize terminal for split view
+					Keys: ↑↓/jk g/G ↵{model.setupAvailable ? ' i' : ''} L s r q · Resize terminal for split view
 				</Text>
 			</Box>
 		);
@@ -533,10 +539,10 @@ export function App({
 					stacked={stackedLayout}
 					scrollOffset={worktreeScrollOffset}
 				/>
-				<ActionPanel selectedRow={selected} activePath={model.activePath} stacked={stackedLayout} width={stackedLayout ? bodyWidth : actionWidth} height={paneHeight} compactDetails={compactDetailPane} scrollOffset={selectionScrollOffset} />
+				<ActionPanel selectedRow={selected} activePath={model.activePath} setupAvailable={model.setupAvailable} stacked={stackedLayout} width={stackedLayout ? bodyWidth : actionWidth} height={paneHeight} compactDetails={compactDetailPane} scrollOffset={selectionScrollOffset} />
 			</Box>
 			{showLogPanel ? <LogPanel logs={model.logs} width={bodyWidth} height={logPaneHeight} scrollOffset={logScrollOffset} /> : null}
-			<ContextBar status={model.status} />
+			<ContextBar status={model.status} setupAvailable={model.setupAvailable} />
 			{completedAlert ? (
 				<Box position="absolute" top={1} right={2}>
 					<Alert variant="success">{completedAlert}</Alert>

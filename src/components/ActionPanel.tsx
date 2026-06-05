@@ -207,7 +207,7 @@ function divider(): LineSpec {
 	return {text: ' ', dimColor: true};
 }
 
-function getPanelLines(selectedRow: AppRow | undefined, activePath: string | null, compactDetails: boolean): LineSpec[] {
+function getPanelLines(selectedRow: AppRow | undefined, activePath: string | null, setupAvailable: boolean, compactDetails: boolean): LineSpec[] {
 	if (!selectedRow) {
 		return [{text: 'No worktrees found.', dimColor: true}];
 	}
@@ -255,6 +255,11 @@ function getPanelLines(selectedRow: AppRow | undefined, activePath: string | nul
 		divider(),
 		section('Action'),
 		{text: `${getVariantIcon(actionVariant)} ${getActionMessage(selectedRow, activePath)}`, color: getVariantColor(actionVariant)},
+	);
+	if (setupAvailable) {
+		lines.push({text: 'ℹ Press i to run setup in this worktree.', color: 'blue'});
+	}
+	lines.push(
 		section('Notes'),
 		{text: `${getVariantIcon(noteVariant)} ${getNotes(selectedRow)}`, color: getVariantColor(noteVariant)},
 	);
@@ -276,6 +281,7 @@ function getScrollbarThumbRows(totalLines: number, viewportHeight: number, scrol
 export function ActionPanel({
 	selectedRow,
 	activePath,
+	setupAvailable,
 	stacked,
 	width,
 	height,
@@ -284,13 +290,14 @@ export function ActionPanel({
 }: {
 	selectedRow: AppRow | undefined;
 	activePath: string | null;
+	setupAvailable: boolean;
 	stacked: boolean;
 	width?: number;
 	height?: number;
 	compactDetails?: boolean;
 	scrollOffset?: number;
 }) {
-	const lines = getPanelLines(selectedRow, activePath, compactDetails ?? false);
+	const lines = getPanelLines(selectedRow, activePath, setupAvailable, compactDetails ?? false);
 	const contentViewportHeight = height === undefined ? undefined : Math.max(1, height - 3);
 	const maxScrollOffset = contentViewportHeight === undefined ? 0 : Math.max(0, lines.length - contentViewportHeight);
 	const effectiveScrollOffset = Math.min(Math.max(scrollOffset, 0), maxScrollOffset);

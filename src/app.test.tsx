@@ -12,6 +12,9 @@ function makeFakeActions(result: AppModel): AppActions {
 		stop: vi.fn(async () => result),
 		refresh: vi.fn(async () => result),
 		refreshLogs: vi.fn(async () => ({logs: result.logs, activePath: result.activePath, activeBranch: result.activeBranch})),
+		openEditor: vi.fn(async () => result),
+		openPullRequest: vi.fn(async () => result),
+		deleteWorktree: vi.fn(async () => result),
 	};
 }
 
@@ -28,6 +31,7 @@ function createModel(overrides: Partial<AppModel> = {}): AppModel {
 		activeBranch: 'feat/a',
 		status: {kind: 'idle', message: 'ready'},
 		setupAvailable: false,
+		editorAvailable: true,
 		logs: [
 			{name: 'feat-a.log', path: '/repo/.git/worktree-command-tui/logs/feat-a.log', content: 'ready\nserver started'},
 		],
@@ -117,7 +121,7 @@ it('renders colored pane labels and active marker in the main layout', () => {
 	expect(lastFrame()).toContain('Worktrees');
 	expect(lastFrame()).toContain('Selection / Action');
 	expect(lastFrame()).toContain('idle');
-	expect(lastFrame()).toContain('↑↓/jk Move | Enter Switch | L Logs | s Stop | r Refresh | ? Help | q Quit');
+	expect(lastFrame()).toContain('↑↓/jk Move | Enter Switch | e Editor | o Open PR | d Delete | L Logs | s Stop | r Refresh | ? Help | q Quit');
 	expect(lastFrame()).not.toContain('PageUp');
 	expect(stripAnsi(lastFrame())).toContain('* feat/a');
 });
@@ -131,7 +135,29 @@ it('renders setup in the primary key hints only when setup is available', () => 
 	).lastFrame()).not.toContain('i Setup');
 	expect(render(
 		<App initialModel={enabled} actions={makeFakeActions(enabled)} windowSizeOverride={{columns: 140, rows: 30}} />,
-	).lastFrame()).toContain('Enter Switch | i Setup | L Logs');
+	).lastFrame()).toContain('Enter Switch | i Setup | e Editor');
+});
+
+it('hides editor hints when no editor command is configured', () => {
+	const model = createModel({editorAvailable: false});
+	const frame = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 140, rows: 30}} />,
+	).lastFrame() ?? '';
+
+	expect(frame).not.toContain('e Editor');
+	expect(frame).toContain('o Open PR');
+});
+
+it('ignores the hidden editor shortcut when no editor command is configured', async () => {
+	const model = createModel({editorAvailable: false});
+	const openEditor = vi.fn(async () => model);
+	const {stdin} = render(
+		<App initialModel={model} actions={{...makeFakeActions(model), openEditor}} windowSizeOverride={{columns: 140, rows: 30}} />,
+	);
+
+	stdin.write('e');
+	await waitForInput();
+	expect(openEditor).not.toHaveBeenCalled();
 });
 
 it('opens and closes detailed key help', async () => {
@@ -661,17 +687,30 @@ it('renders a minimal fallback shell on very short terminals', () => {
 	expect(lastFrame()).toContain('A:develop');
 	expect(lastFrame()).toContain('S:develop');
 	expect(lastFrame()).toContain('T:idle');
-	expect(lastFrame()).toContain('↑↓jk↵Lq');
+	expect(lastFrame()).toContain('↑↓jk↵eodLq');
 });
 
 it('shows setup shortcut in the minimal shell only when setup is configured', () => {
 	const base = createModel({rows: [{path: '/repo', shortPath: '.', branch: 'develop', tags: ['main']}], activePath: '/repo', activeBranch: 'develop'});
 	const withoutSetup = render(<App initialModel={base} actions={makeFakeActions(base)} windowSizeOverride={{columns: 30, rows: 8}} />);
-	expect(withoutSetup.lastFrame()).toContain('↑↓jk↵Lq');
+	expect(withoutSetup.lastFrame()).toContain('↑↓jk↵eodLq');
 
 	const withSetup = createModel({...base, setupAvailable: true});
 	const withSetupRender = render(<App initialModel={withSetup} actions={makeFakeActions(withSetup)} windowSizeOverride={{columns: 30, rows: 8}} />);
-	expect(withSetupRender.lastFrame()).toContain('↑↓jk↵iLq');
+	expect(withSetupRender.lastFrame()).toContain('↑↓jk↵ieodLq');
+});
+
+it('shows delete confirmation in the minimal layout', async () => {
+	const model = createModel({
+		rows: [{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: []}],
+		activePath: null,
+		activeBranch: null,
+	});
+	const {lastFrame, stdin} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 18, rows: 8}} />);
+	stdin.write('d');
+	await waitForInput();
+	expect(lastFrame()).toContain('D:Delete feat/a?');
+	expect(lastFrame()).toContain('d/y confirm');
 });
 
 it('shows completion alert after starting a worktree', async () => {
@@ -706,7 +745,7 @@ it('renders a minimal fallback shell on extremely small terminals', () => {
 	expect(lastFrame()).toContain('A:devel…');
 	expect(lastFrame()).toContain('S:devel…');
 	expect(lastFrame()).toContain('T:idle');
-	expect(lastFrame()).toContain('↑↓jk↵Lq');
+	expect(lastFrame()).toContain('↑↓jk↵eo…');
 });
 
 it('keeps the active branch visible when header metadata is long', () => {
@@ -1160,6 +1199,92 @@ it('runs setup command for the selected worktree when i is pressed', async () =>
 	expect(lastFrame()).toContain('setup complete for feat/a');
 });
 
+it('opens the selected worktree in the configured editor when e is pressed', async () => {
+	const model = createModel({
+		rows: [{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: []}],
+		activePath: null,
+		activeBranch: null,
+	});
+	const opened = {...model, status: {kind: 'idle' as const, message: 'opened editor for feat/a'}};
+	const openEditor = vi.fn(async () => opened);
+	const {lastFrame, stdin} = render(<App initialModel={model} actions={{...makeFakeActions(model), openEditor}} windowSizeOverride={{columns: 120, rows: 30}} />);
+	stdin.write('e');
+	await waitForInput();
+	await waitForInput();
+	expect(openEditor).toHaveBeenCalledWith('/repo/.worktree/feat-a');
+	expect(lastFrame()).toContain('opened editor for feat/a');
+});
+
+it('opens the selected pull request when o is pressed', async () => {
+	const model = createModel({
+		rows: [{
+			path: '/repo/.worktree/feat-a',
+			shortPath: '.worktree/feat-a',
+			branch: 'feat/a',
+			tags: [],
+			pullRequest: {
+				kind: 'found',
+				number: 2125,
+				title: 'Selection pane metadata',
+				url: 'https://github.com/finn-inc/reclaim-the-forest/pull/2125',
+				state: 'OPEN',
+				isDraft: false,
+				baseBranch: 'develop',
+			},
+		}],
+		activePath: null,
+		activeBranch: null,
+	});
+	const opened = {...model, status: {kind: 'idle' as const, message: 'opened pull request #2125 for feat/a'}};
+	const openPullRequest = vi.fn(async () => opened);
+	const {lastFrame, stdin} = render(<App initialModel={model} actions={{...makeFakeActions(model), openPullRequest}} windowSizeOverride={{columns: 120, rows: 30}} />);
+	stdin.write('o');
+	await waitForInput();
+	await waitForInput();
+	expect(openPullRequest).toHaveBeenCalledWith('/repo/.worktree/feat-a');
+	expect(lastFrame()).toContain('opened pull request #2125 for feat/a');
+});
+
+it('cancels delete confirmation without removing the selected worktree', async () => {
+	const model = createModel({
+		rows: [{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: []}],
+		activePath: null,
+		activeBranch: null,
+	});
+	const deleteWorktree = vi.fn(async () => model);
+	const {lastFrame, stdin} = render(<App initialModel={model} actions={{...makeFakeActions(model), deleteWorktree}} windowSizeOverride={{columns: 120, rows: 30}} />);
+	stdin.write('d');
+	await waitForInput();
+	expect(lastFrame()).toContain('Delete feat/a? d/y confirm, Esc/n/q cancel');
+	stdin.write('n');
+	await waitForInput();
+	expect(deleteWorktree).not.toHaveBeenCalled();
+	expect(lastFrame()).not.toContain('Delete feat/a? d/y confirm, Esc/n/q cancel');
+});
+
+it('deletes the selected worktree after confirming with y', async () => {
+	const model = createModel({
+		rows: [{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: []}],
+		activePath: null,
+		activeBranch: null,
+	});
+	const deleted = createModel({
+		rows: [{path: '/repo', shortPath: '.', branch: 'develop', tags: ['main']}],
+		activePath: null,
+		activeBranch: null,
+		status: {kind: 'idle', message: 'deleted feat/a'},
+	});
+	const deleteWorktree = vi.fn(async () => deleted);
+	const {lastFrame, stdin} = render(<App initialModel={model} actions={{...makeFakeActions(model), deleteWorktree}} windowSizeOverride={{columns: 120, rows: 30}} />);
+	stdin.write('d');
+	await waitForInput();
+	stdin.write('y');
+	await waitForInput();
+	await waitForInput();
+	expect(deleteWorktree).toHaveBeenCalledWith('/repo/.worktree/feat-a');
+	expect(lastFrame()).toContain('deleted feat/a');
+});
+
 it('ignores setup key when setupCommand is not configured', async () => {
 	const model = createModel({
 		rows: [{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: []}],
@@ -1194,7 +1319,7 @@ it('starts without running setup when enter is pressed and setup is available', 
 	await waitForInput();
 	expect(start).toHaveBeenCalledWith('/repo/.worktree/feat-a');
 	expect(setup).not.toHaveBeenCalled();
-	expect(lastFrame()).toContain('Active: feat/a');
+	await vi.waitFor(() => expect(lastFrame()).toContain('Active: feat/a'));
 });
 
 

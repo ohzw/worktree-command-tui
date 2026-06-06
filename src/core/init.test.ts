@@ -27,6 +27,7 @@ describe('runInit', () => {
 			namespace: 'example-app',
 			command: ['bun', 'run', 'dev'],
 			setupCommand: ['bun', 'install'],
+			editorCommand: ['code'],
 			port: 3000,
 			requiredFiles: ['package.json'],
 			orphanMatchers: [],
@@ -85,6 +86,7 @@ describe('runInit', () => {
 		const written = readFileSync(configPath, 'utf8');
 		expect(written).toContain('"command"');
 		expect(written).toContain('"setupCommand"');
+		expect(written).toContain('"editorCommand"');
 	});
 });
 

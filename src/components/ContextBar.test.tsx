@@ -34,18 +34,18 @@ function collectElements(node: ReactNode): InspectableElement[] {
 
 describe('ContextBar', () => {
 	it('renders key bindings in white while leaving key labels dimmed', () => {
-		const tree = ContextBar({status: {kind: 'idle', message: 'ready'}, setupAvailable: true});
+		const tree = ContextBar({status: {kind: 'idle', message: 'ready'}, setupAvailable: true, editorAvailable: true, confirmationOpen: false});
 		const whiteText = collectElements(tree)
 			.filter(element => element.props.color === 'white')
 			.map(element => textContent(element.props.children));
 
-		expect(whiteText).toEqual(expect.arrayContaining(['↑↓/jk', 'Enter', 'i', 'L', 's', 'r', '?', 'q']));
+		expect(whiteText).toEqual(expect.arrayContaining(['↑↓/jk', 'Enter', 'i', 'e', 'o', 'd', 'L', 's', 'r', '?', 'q']));
 		expect(whiteText).not.toContain('PageUp');
 		expect(whiteText).not.toContain('Switch');
 	});
 
 	it('dims labels and separators without dimming the key bindings container', () => {
-		const tree = ContextBar({status: {kind: 'idle', message: 'ready'}, setupAvailable: false});
+		const tree = ContextBar({status: {kind: 'idle', message: 'ready'}, setupAvailable: false, editorAvailable: false, confirmationOpen: false});
 		const textElements = collectElements(tree);
 		const helpContainer = textElements.find(element => textContent(element.props.children).startsWith('↑↓/jk'));
 		const dimmedText = textElements
@@ -56,5 +56,25 @@ describe('ContextBar', () => {
 		expect(textContent(tree)).not.toContain('Keys:');
 		expect(dimmedText).toEqual(expect.arrayContaining([' Move', ' | ']));
 		expect(dimmedText).not.toContain('↑↓/jk');
+	});
+
+	it('swaps normal shortcuts for delete confirmation hints when armed', () => {
+		const tree = ContextBar({status: {kind: 'idle', message: 'Delete feat/a?'}, setupAvailable: true, editorAvailable: true, confirmationOpen: true});
+		const text = textContent(tree);
+
+		expect(text).toContain('d/y');
+		expect(text).toContain('Confirm');
+		expect(text).toContain('Esc/n/q');
+		expect(text).toContain('Cancel');
+		expect(text).not.toContain('Enter');
+	});
+
+	it('hides the editor shortcut when no editor command is configured', () => {
+		const tree = ContextBar({status: {kind: 'idle', message: 'ready'}, setupAvailable: true, editorAvailable: false, confirmationOpen: false});
+		const whiteText = collectElements(tree)
+			.filter(element => element.props.color === 'white')
+			.map(element => textContent(element.props.children));
+
+		expect(whiteText).not.toContain('e');
 	});
 });

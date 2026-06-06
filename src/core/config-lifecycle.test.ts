@@ -1,10 +1,12 @@
 import {describe, expect, it} from 'vitest';
-import {createDefaultToolConfig, toSafeNamespace, validateToolConfig} from './config-lifecycle.js';
+import {parseJsonc} from './config.js';
+import {createDefaultToolConfig, renderConfigJsonc, toSafeNamespace, validateToolConfig} from './config-lifecycle.js';
 
 const validConfig = {
 	namespace: 'example-app',
 	command: ['npm', 'run', 'dev'],
 	setupCommand: ['npm', 'install'],
+	editorCommand: ['code', '--reuse-window'],
 	port: 3000,
 	requiredFiles: ['package.json'],
 	orphanMatchers: [],
@@ -16,6 +18,7 @@ describe('validateToolConfig', () => {
 			namespace: 'example-app',
 			command: ['npm', 'run', 'dev'],
 			setupCommand: undefined,
+			editorCommand: undefined,
 			port: 3000,
 			requiredFiles: [],
 			orphanMatchers: [],
@@ -33,10 +36,15 @@ describe('validateToolConfig', () => {
 			namespace: 'example-app',
 			command: ['npm', 'run', 'start'],
 			setupCommand: ['npm', 'install'],
+			editorCommand: ['code'],
 			port: 3000,
 			requiredFiles: ['package.json'],
 			orphanMatchers: [],
 		});
+	});
+
+	it('round-trips editorCommand through jsonc rendering', () => {
+		expect(validateToolConfig(parseJsonc(renderConfigJsonc(validConfig)))).toEqual(validConfig);
 	});
 
 	it('rejects invalid namespaces with the public load error', () => {
@@ -54,7 +62,13 @@ describe('validateToolConfig', () => {
 		);
 	});
 
-	it('rejects malformed optional list fields with public load errors', () => {
+	it('rejects malformed optional command and list fields with public load errors', () => {
+		expect(() => validateToolConfig({...validConfig, setupCommand: []})).toThrow(
+			'setupCommand must be a non-empty string array when set',
+		);
+		expect(() => validateToolConfig({...validConfig, editorCommand: 'code .'})).toThrow(
+			'editorCommand must be a non-empty string array when set',
+		);
 		expect(() => validateToolConfig({...validConfig, requiredFiles: ['package.json', '']})).toThrow(
 			'requiredFiles must be a string array',
 		);

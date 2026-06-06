@@ -85,6 +85,7 @@ export function validateToolConfig(raw: unknown): ToolConfig {
 		namespace: config.namespace,
 		command,
 		setupCommand: readOptionalCommand(config.setupCommand, 'setupCommand'),
+		editorCommand: readOptionalCommand(config.editorCommand, 'editorCommand'),
 		port: readPort(config.port),
 		requiredFiles: readStringList(config.requiredFiles, 'requiredFiles'),
 		orphanMatchers: readStringList(config.orphanMatchers, 'orphanMatchers'),
@@ -96,6 +97,7 @@ export function createDefaultToolConfig(options: DefaultToolConfigOptions): Tool
 		namespace: toSafeNamespace(options.namespaceSeed),
 		command: [options.packageManager, 'run', options.script],
 		setupCommand: [options.packageManager, 'install'],
+		editorCommand: ['code'],
 		port: 3000,
 		requiredFiles: ['package.json'],
 		orphanMatchers: [],
@@ -124,6 +126,11 @@ export function renderConfigJsonc(config: ToolConfig): string {
   // Useful for first-time dependency installation without doing it on every switch.
   "setupCommand": ${JSON.stringify(config.setupCommand)},
 `;
+	const editorCommandSection = config.editorCommand === undefined ? '' : `
+  // Optional command that opens the selected worktree path in an editor.
+  // The selected worktree path is appended as the final argv entry.
+  "editorCommand": ${JSON.stringify(config.editorCommand)},
+`;
 	return `{
   // Session namespace used for git-common-dir state files and logs.
   // Keep this filesystem-safe: letters, numbers, dots, underscores, and hyphens only.
@@ -132,7 +139,7 @@ export function renderConfigJsonc(config: ToolConfig): string {
   // Command launched in the selected worktree.
   // Use argv form so spaces and shell metacharacters are passed safely.
   "command": ${JSON.stringify(config.command)},
-${setupCommandSection}
+${setupCommandSection}${editorCommandSection}
   // TCP port owned by the command, used when stopping stale/orphaned processes.
   "port": ${JSON.stringify(config.port)},
 

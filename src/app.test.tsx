@@ -86,9 +86,24 @@ it('switches to stacked and minimal layouts at the expected breakpoints', () => 
 	expect(shouldUseCompactLayout(90, 22, 3)).toBe(false);
 	expect(shouldUseCompactLayout(30, 30, 1)).toBe(false);
 	expect(shouldUseCompactLayout(120, 30, 3)).toBe(false);
-	expect(shouldStackPanes(90, 30, 3)).toBe(false);
-	expect(shouldStackPanes(90, 40, 3)).toBe(true);
+	expect(shouldStackPanes(90, 28, 3)).toBe(false);
+	expect(shouldStackPanes(90, 29, 3)).toBe(true);
+	expect(shouldStackPanes(90, 30, 3)).toBe(true);
 	expect(shouldStackPanes(120, 40, 3)).toBe(false);
+});
+
+it('stacks the worktree and selection panes once the terminal is narrow enough', () => {
+	const model = createModel();
+	const {lastFrame} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 90, rows: 30}} />,
+	);
+
+	const frame = lastFrame() ?? '';
+	const lines = frame.split('\n');
+	const worktreesLine = lines.findIndex(line => line.includes('Worktrees'));
+	const selectionLine = lines.findIndex(line => line.includes('Selection / Action'));
+	expect(worktreesLine).toBeGreaterThanOrEqual(0);
+	expect(selectionLine).toBeGreaterThan(worktreesLine + 1);
 });
 
 it('renders colored pane labels and active marker in the main layout', () => {

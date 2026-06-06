@@ -199,9 +199,10 @@ export function App({
 		};
 	}, []);
 
-	const visibleStatus = pendingDelete === null
-		? model.status
-		: {kind: 'idle' as const, message: `Delete ${pendingDelete.branch}? d/y confirm, Esc/n/q cancel`};
+	const confirmationOpen = pendingDelete !== null;
+	const visibleStatus = confirmationOpen
+		? {kind: 'idle' as const, message: `Delete ${pendingDelete.branch}? d/y confirm, Esc/n/q cancel`}
+		: model.status;
 
 	useEffect(() => {
 		if (!shouldRefreshLogs(model)) {
@@ -248,10 +249,10 @@ export function App({
 	}, [actions, model.activePath, model.status.kind, model.status.message]);
 
 	useEffect(() => {
-		if (pendingDelete !== null && !model.rows.some(row => row.path === pendingDelete.path)) {
+		if (confirmationOpen && !model.rows.some(row => row.path === pendingDelete.path)) {
 			setPendingDelete(null);
 		}
-	}, [model.rows, pendingDelete]);
+	}, [confirmationOpen, model.rows, pendingDelete]);
 
 
 	const selectedIndex = useMemo(() => getSelectedIndex(model.rows, selectedPath), [model.rows, selectedPath]);
@@ -357,7 +358,7 @@ export function App({
 			}
 			return;
 		}
-		if (pendingDelete !== null) {
+		if (confirmationOpen) {
 			if (key.escape || input === '\u001B' || input === 'q' || input === 'n') {
 				setPendingDelete(null);
 				return;
@@ -463,8 +464,8 @@ export function App({
 			return;
 		}
 		if (input === 'd' && selected) {
-			setPendingDelete({path: selected.path, branch: selected.branch});
 			clearTransientAlert();
+			setPendingDelete({path: selected.path, branch: selected.branch});
 			return;
 		}
 		if (input === 'r') {
@@ -636,11 +637,11 @@ export function App({
 					A:{model.activeBranch ?? '-'}
 				</Text>
 				{rootHeight >= 2 ? <Text wrap="truncate-end">S:{selected?.branch ?? '-'}</Text> : null}
-				{rootHeight >= 3 ? <Text wrap="truncate-end">{pendingDelete === null ? `T:${model.status.kind}` : `D:${visibleStatus.message}`}</Text> : null}
+				{rootHeight >= 3 ? <Text wrap="truncate-end">{confirmationOpen ? `D:${visibleStatus.message}` : `T:${model.status.kind}`}</Text> : null}
 				{rootHeight >= 4 ? (
-					pendingDelete === null
-						? <Text dimColor wrap="truncate-end">↑↓jk↵{model.setupAvailable ? 'i' : ''}{model.editorAvailable ? 'e' : ''}odLq</Text>
-						: <Text dimColor wrap="truncate-end">d/y confirm · Esc/n/q cancel</Text>
+					confirmationOpen
+						? <Text dimColor wrap="truncate-end">d/y confirm · Esc/n/q cancel</Text>
+						: <Text dimColor wrap="truncate-end">↑↓jk↵{model.setupAvailable ? 'i' : ''}{model.editorAvailable ? 'e' : ''}odLq</Text>
 				) : null}
 			</Box>
 		);
@@ -661,9 +662,9 @@ export function App({
 						<Text wrap="truncate-end">Status: {visibleStatus.kind} — {visibleStatus.message}</Text>
 					)}
 				<Text dimColor wrap="truncate-end">
-					{pendingDelete === null
-						? `Keys: ↑↓/jk g/G ↵${model.setupAvailable ? ' i' : ''}${model.editorAvailable ? ' e' : ''} o d L s r q · Resize terminal for split view`
-						: 'Keys: d/y confirm | Esc/n/q cancel'}
+					{confirmationOpen
+						? 'Keys: d/y confirm | Esc/n/q cancel'
+						: `Keys: ↑↓/jk g/G ↵${model.setupAvailable ? ' i' : ''}${model.editorAvailable ? ' e' : ''} o d L s r q · Resize terminal for split view`}
 				</Text>
 			</Box>
 		);
@@ -684,7 +685,7 @@ export function App({
 				<ActionPanel selectedRow={selected} activePath={model.activePath} setupAvailable={model.setupAvailable} stacked={stackedLayout} width={stackedLayout ? bodyWidth : actionWidth} height={paneHeight} compactDetails={compactDetailPane} scrollOffset={selectionScrollOffset} />
 			</Box>
 			{showLogPanel ? <LogPanel logs={model.logs} width={bodyWidth} height={logPaneHeight} scrollOffset={logScrollOffset} /> : null}
-			<ContextBar status={visibleStatus} setupAvailable={model.setupAvailable} editorAvailable={model.editorAvailable} confirmationOpen={pendingDelete !== null} />
+			<ContextBar status={visibleStatus} setupAvailable={model.setupAvailable} editorAvailable={model.editorAvailable} confirmationOpen={confirmationOpen} />
 			{completedAlert ? (
 				<Box position="absolute" top={1} right={2}>
 					<Alert variant="success">{completedAlert}</Alert>

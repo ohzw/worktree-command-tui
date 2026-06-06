@@ -46,19 +46,13 @@ export function createRuntimeStateActions({config, paths, adapter}: RuntimeState
 		};
 	};
 
-	const refreshWithStatus = async (run: () => Promise<AppStatus>): Promise<AppModel> => {
+	const refreshWithStatus = async (
+		run: () => Promise<AppStatus>,
+		preserveRunningStatus: boolean,
+	): Promise<AppModel> => {
 		const status = await run();
 		const model = await adapter.refresh();
-		return {
-			...model,
-			status,
-		};
-	};
-
-	const refreshKeepingRunningStatus = async (run: () => Promise<AppStatus>): Promise<AppModel> => {
-		const status = await run();
-		const model = await adapter.refresh();
-		if (model.activePath !== null && status.kind === 'idle') {
+		if (preserveRunningStatus && model.activePath !== null && status.kind === 'idle') {
 			return {
 				...model,
 				status: {kind: 'running', message: status.message},
@@ -172,9 +166,9 @@ export function createRuntimeStateActions({config, paths, adapter}: RuntimeState
 		};
 	};
 
-	const openEditor = async (worktreePath: string): Promise<AppModel> => refreshKeepingRunningStatus(() => adapter.openEditor(worktreePath));
-	const openPullRequest = async (worktreePath: string): Promise<AppModel> => refreshKeepingRunningStatus(() => adapter.openPullRequest(worktreePath));
-	const deleteWorktree = async (worktreePath: string): Promise<AppModel> => refreshWithStatus(() => adapter.deleteWorktree(worktreePath));
+	const openEditor = async (worktreePath: string): Promise<AppModel> => refreshWithStatus(() => adapter.openEditor(worktreePath), true);
+	const openPullRequest = async (worktreePath: string): Promise<AppModel> => refreshWithStatus(() => adapter.openPullRequest(worktreePath), true);
+	const deleteWorktree = async (worktreePath: string): Promise<AppModel> => refreshWithStatus(() => adapter.deleteWorktree(worktreePath), false);
 
 	return {setup, start, stop, refresh: adapter.refresh, refreshLogs, openEditor, openPullRequest, deleteWorktree};
 }

@@ -62,7 +62,7 @@ export function getMouseWheelDelta(input: string): number {
 export function getShellDimensions(columns: number, rows: number): ShellDimensions {
 	const rootWidth = Math.max(columns, 1);
 	const rootHeight = Math.max(rows, 1);
-	const bodyWidth = Math.max(rootWidth - 4, 1);
+	const bodyWidth = rootWidth;
 	const maxListWidth = Math.max(1, bodyWidth - 21);
 	const desiredListWidth = Math.max(1, Math.floor((bodyWidth - 1) * 0.34));
 	const listWidth = Math.min(42, desiredListWidth, maxListWidth);
@@ -78,16 +78,19 @@ export function shouldUseMinimalLayout(columns: number, rows: number): boolean {
 	return columns < 20 || rows < 10;
 }
 
-const STACKED_LAYOUT_FRAME_ROWS = 11;
+const STACKED_LAYOUT_FRAME_ROWS = 9;
+const HEADER_HEIGHT = 5;
+const CONTEXT_BAR_HEIGHT = 4;
+const PANE_GAP_WIDTH = 1;
 const MIN_STACKED_PANE_HEIGHT = 9;
 
 export function shouldStackPanes(columns: number, rows: number, _worktreeCount = 0): boolean {
-	// Each stacked pane includes its own border and title. At 9 rows, both panes still keep ~6 visible content lines.
+	// Header + context bar consume the fixed chrome; each stacked pane still keeps ~6 visible content lines at the minimum height.
 	return columns < 96 && rows >= STACKED_LAYOUT_FRAME_ROWS + (MIN_STACKED_PANE_HEIGHT * 2);
 }
 
 function getLogPaneHeight(_rootHeight: number): number {
-	// Outer pane height. With border + title, 9 rows gives ~6 visible log lines.
+	// Each bordered log pane keeps ~6 visible content lines at 9 rows.
 	return 9;
 }
 
@@ -431,13 +434,17 @@ export function App({
 
 	const listPaneViewportHeight = paneHeight === undefined ? undefined : Math.max(1, paneHeight - 3);
 	const mouseWheelLineStep = 3;
-	const paneAreaLeft = 3;
+	const paneAreaLeft = 1;
 	const worktreePaneRight = !stackedLayout ? paneAreaLeft + listWidth - 1 : undefined;
-	const selectionPaneLeft = !stackedLayout && worktreePaneRight !== undefined ? worktreePaneRight + 2 : undefined;
-	const bodyPaneTop = !stackedLayout && paneHeight !== undefined ? 7 : undefined;
+	const selectionPaneLeft = !stackedLayout && worktreePaneRight !== undefined ? worktreePaneRight + PANE_GAP_WIDTH + 1 : undefined;
+	const bodyPaneTop = !stackedLayout && paneHeight !== undefined ? HEADER_HEIGHT + 1 : undefined;
 	const bodyPaneBottom = !stackedLayout && bodyPaneTop !== undefined && paneHeight !== undefined ? bodyPaneTop + paneHeight - 1 : undefined;
-	const logPaneTop = showLogPanel ? rootHeight - 5 - logPaneHeight + 1 : undefined;
-	const logPaneBottom = showLogPanel ? rootHeight - 5 : undefined;
+	const stackedWorktreePaneTop = stackedLayout && paneHeight !== undefined ? HEADER_HEIGHT + 1 : undefined;
+	const stackedWorktreePaneBottom = stackedLayout && stackedWorktreePaneTop !== undefined && paneHeight !== undefined ? stackedWorktreePaneTop + paneHeight - 1 : undefined;
+	const stackedSelectionPaneTop = stackedLayout && stackedWorktreePaneBottom !== undefined ? stackedWorktreePaneBottom + 1 : undefined;
+	const stackedSelectionPaneBottom = stackedLayout && stackedSelectionPaneTop !== undefined && paneHeight !== undefined ? stackedSelectionPaneTop + paneHeight - 1 : undefined;
+	const logPaneTop = showLogPanel ? rootHeight - CONTEXT_BAR_HEIGHT - logPaneHeight + 1 : undefined;
+	const logPaneBottom = showLogPanel ? rootHeight - CONTEXT_BAR_HEIGHT : undefined;
 
 	useEffect(() => {
 		const onData = (data: Buffer | string) => {
@@ -464,23 +471,7 @@ export function App({
 					continue;
 				}
 
-				const isBodyPaneEvent = bodyPaneTop !== undefined
-					&& bodyPaneBottom !== undefined
-					&& event.y !== undefined
-					&& event.y >= bodyPaneTop
-					&& event.y <= bodyPaneBottom;
-				const isSelectionPaneEvent = isBodyPaneEvent
-					&& selectionPaneLeft !== undefined
-					&& event.x !== undefined
-					&& event.x >= selectionPaneLeft;
-				if (isSelectionPaneEvent) {
-					setSelectionScrollOffset(current => Math.max(0, current + event.delta * mouseWheelLineStep));
-					continue;
-				}
-
-				const shouldScrollWorktrees = !stackedLayout
-					&& (event.x === undefined || worktreePaneRight === undefined || event.x <= worktreePaneRight);
-				if (shouldScrollWorktrees) {
+				const scrollWorktrees = () => {
 					setWorktreeScrollOffset(current => {
 						if (listPaneViewportHeight === undefined) {
 							return 0;
@@ -488,8 +479,52 @@ export function App({
 						const max = Math.max(0, model.rows.length - listPaneViewportHeight);
 						return Math.max(0, Math.min(max, current + event.delta * mouseWheelLineStep));
 					});
-				} else {
+				};
+
+				if (stackedLayout) {
+					const isStackedWorktreeEvent = stackedWorktreePaneTop !== undefined
+						&& stackedWorktreePaneBottom !== undefined
+						&& event.y !== undefined
+						&& event.y >= stackedWorktreePaneTop
+						&& event.y <= stackedWorktreePaneBottom;
+					if (isStackedWorktreeEvent) {
+						scrollWorktrees();
+						continue;
+					}
+
+					const isStackedSelectionEvent = stackedSelectionPaneTop !== undefined
+						&& stackedSelectionPaneBottom !== undefined
+						&& event.y !== undefined
+						&& event.y >= stackedSelectionPaneTop
+						&& event.y <= stackedSelectionPaneBottom;
+					if (isStackedSelectionEvent) {
+						setSelectionScrollOffset(current => Math.max(0, current + event.delta * mouseWheelLineStep));
+					}
+					continue;
+				}
+
+				const isBodyPaneEvent = bodyPaneTop !== undefined
+					&& bodyPaneBottom !== undefined
+					&& event.y !== undefined
+					&& event.y >= bodyPaneTop
+					&& event.y <= bodyPaneBottom;
+				if (!isBodyPaneEvent) {
+					continue;
+				}
+
+				const isSelectionPaneEvent = selectionPaneLeft !== undefined
+					&& event.x !== undefined
+					&& event.x >= selectionPaneLeft;
+				if (isSelectionPaneEvent) {
 					setSelectionScrollOffset(current => Math.max(0, current + event.delta * mouseWheelLineStep));
+					continue;
+				}
+
+				const isWorktreePaneEvent = event.x === undefined
+					|| worktreePaneRight === undefined
+					|| event.x <= worktreePaneRight;
+				if (isWorktreePaneEvent) {
+					scrollWorktrees();
 				}
 			}
 		};
@@ -504,7 +539,7 @@ export function App({
 				stdout.write(DISABLE_MOUSE_TRACKING);
 			}
 		};
-	}, [stdin, stdout, listWidth, stackedLayout, listPaneViewportHeight, mouseWheelLineStep, model.rows.length, showLogPanel, logPaneTop, logPaneBottom, maxLogScrollOffset, worktreePaneRight, selectionPaneLeft, bodyPaneTop, bodyPaneBottom, isLogOverlayOpen, isHelpOverlayOpen]);
+	}, [stdin, stdout, listWidth, stackedLayout, listPaneViewportHeight, mouseWheelLineStep, model.rows.length, showLogPanel, logPaneTop, logPaneBottom, maxLogScrollOffset, worktreePaneRight, selectionPaneLeft, bodyPaneTop, bodyPaneBottom, stackedWorktreePaneTop, stackedWorktreePaneBottom, stackedSelectionPaneTop, stackedSelectionPaneBottom, isLogOverlayOpen, isHelpOverlayOpen]);
 
 	useEffect(() => {
 		if (listPaneViewportHeight === undefined) {
@@ -567,7 +602,7 @@ export function App({
 
 	if (compactLayout) {
 		return (
-			<Box width={rootWidth} height={rootHeight} borderStyle="round" borderColor="yellow" flexDirection="column" paddingX={1}>
+			<Box width={rootWidth} height={rootHeight} flexDirection="column">
 				<Text bold color="green" wrap="truncate-end">
 					Active: {model.activeBranch ?? '-'}
 				</Text>
@@ -587,7 +622,7 @@ export function App({
 	}
 
 	return (
-		<Box width={rootWidth} height={rootHeight} borderStyle="round" borderColor="gray" flexDirection="column" paddingX={1}>
+		<Box width={rootWidth} height={rootHeight} flexDirection="column">
 			<Header repoName={model.repoName} namespace={model.namespace} activeBranch={model.activeBranch} />
 			<Box flexDirection={stackedLayout ? 'column' : 'row'} flexGrow={stackedLayout ? 0 : 1} flexShrink={1}>
 				<WorktreeList

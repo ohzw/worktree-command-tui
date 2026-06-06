@@ -3,6 +3,7 @@ import {chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSyn
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {describe, expect, it, vi} from 'vitest';
+import {readSessionRecord, getSessionPaths} from './session-store.js';
 import {parseGitStatusSummary} from './git-metadata.js';
 import {buildActions, toAppRow} from './runtime.js';
 const TEST_GITHUB_OWNER = 'finn-inc';
@@ -41,6 +42,18 @@ fi
 exit 2
 `);
 	chmodSync(ghPath, 0o755);
+}
+
+function writeMockBrowserBinary(browserPath: string, callsPath: string): void {
+	writeFileSync(browserPath, `#!/bin/sh
+printf '%s\\n' "$*" >> ${JSON.stringify(callsPath)}
+`);
+	chmodSync(browserPath, 0o755);
+}
+
+function commitTrackedFiles(root: string, ...files: string[]): void {
+	execFileSync('git', ['add', ...files], {cwd: root});
+	execFileSync('git', ['commit', '-m', 'add tracked files'], {cwd: root});
 }
 
 
@@ -197,6 +210,99 @@ describe('pull request metadata', () => {
 				process.env.PATH = previousPath;
 			}
 		}
+	});
+});
+
+describe('buildActions worktree actions', () => {
+	it('opens the configured editor with the selected worktree path appended', async () => {
+		const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'wctui-runtime-editor-')));
+		const openedPathLog = path.join(root, 'editor-opened.txt');
+		initGitRepo(root);
+		writeFileSync(path.join(root, 'package.json'), '{}');
+		writeFileSync(path.join(root, '.worktree-command-tui.jsonc'), JSON.stringify({
+			namespace: 'runtime-editor',
+			command: ['node', '-e', 'console.log("ready")'],
+			editorCommand: ['node', '-e', 'require("node:fs").writeFileSync(process.argv[1], process.argv[2])', openedPathLog],
+			port: 31238,
+			requiredFiles: ['package.json'],
+			orphanMatchers: [],
+		}));
+		const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {cwd: root, encoding: 'utf8'}).trim();
+
+		const actions = await buildActions(root);
+		const model = await actions.openEditor(root);
+
+		await vi.waitFor(() => expect(readFileSync(openedPathLog, 'utf8')).toBe(root));
+		expect(model.status).toEqual({kind: 'idle', message: `opened editor for ${branch}`});
+	});
+
+	it('opens the pull request URL in the OS browser', async () => {
+		const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'wctui-runtime-open-pr-')));
+		initGitRepo(root);
+		writeRepoConfigAndPackage(root, 'runtime-open-pr');
+		const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {cwd: root, encoding: 'utf8'}).trim();
+		const binDir = path.join(root, 'bin');
+		mkdirSync(binDir);
+		const ghCallsPath = path.join(root, 'gh-calls.log');
+		const browserCallsPath = path.join(root, 'browser-calls.log');
+		writeMockGhBinary(path.join(binDir, 'gh'), ghCallsPath, buildGhPullRequestArgs(branch, 'open'), buildGhPullRequestArgs(branch, 'all'));
+		writeMockBrowserBinary(path.join(binDir, 'open'), browserCallsPath);
+		const previousPath = process.env.PATH;
+		process.env.PATH = `${binDir}${path.delimiter}${previousPath ?? ''}`;
+
+		try {
+			const actions = await buildActions(root);
+			const model = await actions.openPullRequest(root);
+
+			expect(model.status).toEqual({kind: 'idle', message: `opened pull request #2001 for ${branch}`});
+			await vi.waitFor(() => expect(readFileSync(browserCallsPath, 'utf8').trim()).toBe('https://github.com/finn-inc/reclaim-the-forest/pull/2001'));
+		} finally {
+			if (previousPath === undefined) {
+				delete process.env.PATH;
+			} else {
+				process.env.PATH = previousPath;
+			}
+		}
+	});
+
+	it('rejects deleting the main worktree in runtime code', async () => {
+		const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'wctui-runtime-delete-main-')));
+		initGitRepo(root);
+		writeRepoConfigAndPackage(root, 'runtime-delete-main');
+
+		const actions = await buildActions(root);
+		const model = await actions.deleteWorktree(root);
+
+		expect(model.status).toEqual({kind: 'idle', message: 'cannot delete the main worktree'});
+		expect(existsSync(root)).toBe(true);
+	});
+
+	it('removes the selected active worktree and clears its session record', async () => {
+		const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'wctui-runtime-delete-active-')));
+		const worktreePath = path.join(root, '.worktrees', 'feat-delete-active');
+		initGitRepo(root);
+		writeFileSync(path.join(root, 'package.json'), '{}');
+		writeFileSync(path.join(root, '.worktree-command-tui.jsonc'), JSON.stringify({
+			namespace: 'runtime-delete-active',
+			command: ['node', '-e', 'setInterval(() => {}, 1000)'],
+			port: 31239,
+			requiredFiles: ['package.json'],
+			orphanMatchers: [],
+		}));
+		commitTrackedFiles(root, 'package.json', '.worktree-command-tui.jsonc');
+		execFileSync('git', ['worktree', 'add', '-b', 'feat/delete-active', worktreePath], {cwd: root});
+
+		const actions = await buildActions(root);
+		await actions.start(worktreePath);
+		const deleted = await actions.deleteWorktree(worktreePath);
+		const gitCommonDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {cwd: root, encoding: 'utf8'}).trim();
+		const sessionPaths = getSessionPaths(gitCommonDir, 'runtime-delete-active');
+
+		await vi.waitFor(() => expect(existsSync(worktreePath)).toBe(false));
+		expect(await readSessionRecord(sessionPaths, {isSessionAlive: async () => true})).toBeNull();
+		expect(deleted.activePath).toBeNull();
+		expect(deleted.activeBranch).toBeNull();
+		expect(deleted.status).toEqual({kind: 'idle', message: 'deleted feat/delete-active'});
 	});
 });
 

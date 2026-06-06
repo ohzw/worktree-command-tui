@@ -14,6 +14,7 @@ const config: ToolConfig = {
 	namespace: 'test',
 	command: ['npm', 'start'],
 	setupCommand: ['npm', 'install'],
+	editorCommand: ['code', '--reuse-window'],
 	port: 3000,
 	requiredFiles: ['package.json'],
 	orphanMatchers: ['vite --host'],
@@ -27,6 +28,7 @@ const baseModel: AppModel = {
 	activeBranch: null,
 	status: {kind: 'idle', message: 'ready'},
 	setupAvailable: true,
+	editorAvailable: true,
 	logs: [],
 };
 
@@ -65,6 +67,9 @@ function makeAdapter(overrides: Partial<RuntimeStateAdapter> = {}) {
 		writeSession: vi.fn(async () => {
 			calls.push('write');
 		}),
+		openEditor: vi.fn(async () => ({kind: 'idle' as const, message: 'opened editor for main'})),
+		openPullRequest: vi.fn(async () => ({kind: 'idle' as const, message: 'no pull request found for main'})),
+		deleteWorktree: vi.fn(async () => ({kind: 'idle' as const, message: 'deleted main'})),
 		nowIso: vi.fn(() => '2026-06-05T12:00:00.000Z'),
 		...overrides,
 	};
@@ -136,6 +141,65 @@ describe('createRuntimeStateActions', () => {
 		expect(model.status).toEqual({kind: 'idle', message: 'already stopped'});
 		expect(model.activePath).toBeNull();
 		expect(model.activeBranch).toBeNull();
+	});
+
+	it('returns editor status after refresh', async () => {
+		const {adapter} = makeAdapter();
+		const actions = createRuntimeStateActions({config, paths, adapter});
+
+		const model = await actions.openEditor('/repo');
+
+		expect(adapter.openEditor).toHaveBeenCalledWith('/repo');
+		expect(model.status).toEqual({kind: 'idle', message: 'opened editor for main'});
+	});
+
+	it('keeps running status after non-destructive actions when a session stays active', async () => {
+		const {adapter} = makeAdapter({
+			refresh: vi.fn(async () => ({...baseModel, activePath: '/repo', activeBranch: 'main', status: {kind: 'running' as const, message: 'Active: main'}})),
+		});
+		const actions = createRuntimeStateActions({config, paths, adapter});
+
+		const model = await actions.openEditor('/repo');
+
+		expect(model.activePath).toBe('/repo');
+		expect(model.activeBranch).toBe('main');
+		expect(model.status).toEqual({kind: 'running', message: 'opened editor for main'});
+	});
+
+	it('returns pull request status after refresh without throwing for no-op results', async () => {
+		const {adapter} = makeAdapter();
+		const actions = createRuntimeStateActions({config, paths, adapter});
+
+		const model = await actions.openPullRequest('/repo');
+
+		expect(adapter.openPullRequest).toHaveBeenCalledWith('/repo');
+		expect(model.status).toEqual({kind: 'idle', message: 'no pull request found for main'});
+	});
+
+	it('returns delete status after refresh', async () => {
+		const {adapter} = makeAdapter({
+			refresh: vi.fn(async () => ({...baseModel, rows: []})),
+		});
+		const actions = createRuntimeStateActions({config, paths, adapter});
+
+		const model = await actions.deleteWorktree('/repo');
+
+		expect(adapter.deleteWorktree).toHaveBeenCalledWith('/repo');
+		expect(model.rows).toEqual([]);
+		expect(model.status).toEqual({kind: 'idle', message: 'deleted main'});
+	});
+
+	it('keeps delete status idle when another session remains active after refresh', async () => {
+		const {adapter} = makeAdapter({
+			refresh: vi.fn(async () => ({...baseModel, activePath: '/repo', activeBranch: 'main', status: {kind: 'running' as const, message: 'Active: main'}})),
+		});
+		const actions = createRuntimeStateActions({config, paths, adapter});
+
+		const model = await actions.deleteWorktree('/repo');
+
+		expect(model.activePath).toBe('/repo');
+		expect(model.activeBranch).toBe('main');
+		expect(model.status).toEqual({kind: 'idle', message: 'deleted main'});
 	});
 
 	it('refreshes logs from the active session log path', async () => {

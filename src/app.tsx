@@ -161,6 +161,7 @@ export function App({
 	const [logScrollOffset, setLogScrollOffset] = useState(0);
 	const [isLogOverlayOpen, setIsLogOverlayOpen] = useState(false);
 	const [isHelpOverlayOpen, setIsHelpOverlayOpen] = useState(false);
+	const [pendingDelete, setPendingDelete] = useState<{path: string; branch: string} | null>(null);
 	const [completedAlert, setCompletedAlert] = useState<string | null>(null);
 	const userActionInFlightRef = useRef(false);
 	const logRefreshInFlightRef = useRef(false);
@@ -197,6 +198,11 @@ export function App({
 			}
 		};
 	}, []);
+
+	const confirmationOpen = pendingDelete !== null;
+	const visibleStatus = confirmationOpen
+		? {kind: 'idle' as const, message: `Delete ${pendingDelete.branch}? d/y confirm, Esc/n/q cancel`}
+		: model.status;
 
 	useEffect(() => {
 		if (!shouldRefreshLogs(model)) {
@@ -241,6 +247,13 @@ export function App({
 			clearInterval(logRefreshInterval);
 		};
 	}, [actions, model.activePath, model.status.kind, model.status.message]);
+
+	useEffect(() => {
+		if (confirmationOpen && !model.rows.some(row => row.path === pendingDelete.path)) {
+			setPendingDelete(null);
+		}
+	}, [confirmationOpen, model.rows, pendingDelete]);
+
 
 	const selectedIndex = useMemo(() => getSelectedIndex(model.rows, selectedPath), [model.rows, selectedPath]);
 	const selected = model.rows[selectedIndex];
@@ -345,6 +358,20 @@ export function App({
 			}
 			return;
 		}
+		if (confirmationOpen) {
+			if (key.escape || input === '\u001B' || input === 'q' || input === 'n') {
+				setPendingDelete(null);
+				return;
+			}
+			if (input === 'd' || input === 'y') {
+				const {path: worktreePath} = pendingDelete;
+				setPendingDelete(null);
+				clearTransientAlert();
+				void apply(() => actions.deleteWorktree(worktreePath));
+				return;
+			}
+			return;
+		}
 		if (key.escape || input === 'q') {
 			exit();
 			return;
@@ -424,6 +451,21 @@ export function App({
 			setModel(current => ({...current, status: decision.status}));
 			clearTransientAlert();
 			void apply(() => actions.setup(decision.path));
+			return;
+		}
+		if (input === 'e' && selected && model.editorAvailable) {
+			clearTransientAlert();
+			void apply(() => actions.openEditor(selected.path));
+			return;
+		}
+		if (input === 'o' && selected) {
+			clearTransientAlert();
+			void apply(() => actions.openPullRequest(selected.path));
+			return;
+		}
+		if (input === 'd' && selected) {
+			clearTransientAlert();
+			setPendingDelete({path: selected.path, branch: selected.branch});
 			return;
 		}
 		if (input === 'r') {
@@ -570,6 +612,7 @@ export function App({
 		return (
 			<HelpWindow
 				setupAvailable={model.setupAvailable}
+				editorAvailable={model.editorAvailable}
 				width={Math.max(1, rootWidth - 1)}
 				height={rootHeight}
 			/>
@@ -594,8 +637,12 @@ export function App({
 					A:{model.activeBranch ?? '-'}
 				</Text>
 				{rootHeight >= 2 ? <Text wrap="truncate-end">S:{selected?.branch ?? '-'}</Text> : null}
-				{rootHeight >= 3 ? <Text wrap="truncate-end">T:{model.status.kind}</Text> : null}
-				{rootHeight >= 4 ? <Text dimColor wrap="truncate-end">↑↓jk↵{model.setupAvailable ? 'i' : ''}Lq</Text> : null}
+				{rootHeight >= 3 ? <Text wrap="truncate-end">{confirmationOpen ? `D:${visibleStatus.message}` : `T:${model.status.kind}`}</Text> : null}
+				{rootHeight >= 4 ? (
+					confirmationOpen
+						? <Text dimColor wrap="truncate-end">d/y confirm · Esc/n/q cancel</Text>
+						: <Text dimColor wrap="truncate-end">↑↓jk↵{model.setupAvailable ? 'i' : ''}{model.editorAvailable ? 'e' : ''}odLq</Text>
+				) : null}
 			</Box>
 		);
 	}
@@ -612,10 +659,12 @@ export function App({
 					: model.status.kind === 'setting-up' || model.status.kind === 'starting' || model.status.kind === 'stopping' ? (
 						<Spinner label={`Status: ${model.status.kind} — ${model.status.message}`} />
 					) : (
-						<Text wrap="truncate-end">Status: {model.status.kind} — {model.status.message}</Text>
+						<Text wrap="truncate-end">Status: {visibleStatus.kind} — {visibleStatus.message}</Text>
 					)}
 				<Text dimColor wrap="truncate-end">
-					Keys: ↑↓/jk g/G ↵{model.setupAvailable ? ' i' : ''} L s r q · Resize terminal for split view
+					{confirmationOpen
+						? 'Keys: d/y confirm | Esc/n/q cancel'
+						: `Keys: ↑↓/jk g/G ↵${model.setupAvailable ? ' i' : ''}${model.editorAvailable ? ' e' : ''} o d L s r q · Resize terminal for split view`}
 				</Text>
 			</Box>
 		);
@@ -636,7 +685,7 @@ export function App({
 				<ActionPanel selectedRow={selected} activePath={model.activePath} setupAvailable={model.setupAvailable} stacked={stackedLayout} width={stackedLayout ? bodyWidth : actionWidth} height={paneHeight} compactDetails={compactDetailPane} scrollOffset={selectionScrollOffset} />
 			</Box>
 			{showLogPanel ? <LogPanel logs={model.logs} width={bodyWidth} height={logPaneHeight} scrollOffset={logScrollOffset} /> : null}
-			<ContextBar status={model.status} setupAvailable={model.setupAvailable} />
+			<ContextBar status={visibleStatus} setupAvailable={model.setupAvailable} editorAvailable={model.editorAvailable} confirmationOpen={confirmationOpen} />
 			{completedAlert ? (
 				<Box position="absolute" top={1} right={2}>
 					<Alert variant="success">{completedAlert}</Alert>

@@ -6,7 +6,7 @@ import {CONFIG_FILE_NAME, LEGACY_CONFIG_FILE_NAME} from './config.js';
 import {loadToolConfig} from './config-lifecycle.js';
 
 describe('loadToolConfig', () => {
-	it('loads .worktree-command-tui.jsonc with comments and preserves argv command', async () => {
+	it('loads .worktree-command-tui.jsonc with comments and preserves argv commands', async () => {
 		const root = mkdtempSync(path.join(tmpdir(), 'wctui-config-'));
 		writeFileSync(
 			path.join(root, CONFIG_FILE_NAME),
@@ -15,6 +15,7 @@ describe('loadToolConfig', () => {
 				"namespace": "rojo-serve",
 				"command": ["npm", "run", "serve"],
 				"setupCommand": ["npm", "install"],
+				"editorCommand": ["code", "--reuse-window"],
 				"port": 34872,
 				"requiredFiles": ["package.json", "default.project.json"],
 				"orphanMatchers": ["rbxtsc -w"],
@@ -25,6 +26,7 @@ describe('loadToolConfig', () => {
 		expect(config.namespace).toBe('rojo-serve');
 		expect(config.command).toEqual(['npm', 'run', 'serve']);
 		expect(config.setupCommand).toEqual(['npm', 'install']);
+		expect(config.editorCommand).toEqual(['code', '--reuse-window']);
 		expect(config.port).toBe(34872);
 	});
 
@@ -62,6 +64,16 @@ describe('loadToolConfig', () => {
 		);
 
 		await expect(loadToolConfig({repoRoot: root})).rejects.toThrow('setupCommand must be a non-empty string array when set');
+	});
+
+	it('throws a readable error when editorCommand is not a non-empty argv array', async () => {
+		const root = mkdtempSync(path.join(tmpdir(), 'wctui-config-bad-editor-'));
+		writeFileSync(
+			path.join(root, CONFIG_FILE_NAME),
+			JSON.stringify({namespace: 'rojo-serve', command: ['npm', 'run', 'serve'], editorCommand: 'code .', port: 34872}),
+		);
+
+		await expect(loadToolConfig({repoRoot: root})).rejects.toThrow('editorCommand must be a non-empty string array when set');
 	});
 
 	it('rejects namespace values that escape the namespace slot', async () => {

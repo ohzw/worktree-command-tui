@@ -1,4 +1,6 @@
+import {execFile, spawn} from 'node:child_process';
 import path from 'node:path';
+import {promisify} from 'node:util';
 import {loadToolConfig} from './config-lifecycle.js';
 import {readWorktrees, sortWorktrees, toShortPath, type WorktreeRow} from './git-worktrees.js';
 import {readGitStatusSummary, readBranchCreatedAtMs, resolveRepoContext, type UpstreamInfo, type WorkingTreeInfo} from './git-metadata.js';
@@ -11,6 +13,7 @@ import {stopSessionWithFallback} from './process-control.js';
 import {isProcessGroupAlive, killProcessGroup, killPortOwner, killOrphans} from './posix-process.js';
 import {createRuntimeStateActions} from './runtime-state.js';
 
+const execFileAsync = promisify(execFile);
 const SHORT_SHA_LENGTH = 8;
 
 export type RowTag = 'main' | 'active' | 'invalid' | 'external' | 'legacy';
@@ -44,6 +47,7 @@ export interface AppModel {
 	activeBranch: string | null;
 	status: AppStatus;
 	setupAvailable: boolean;
+	editorAvailable: boolean;
 	logs: AppLogEntry[];
 }
 
@@ -60,6 +64,9 @@ export interface AppActions {
 	stop: () => Promise<AppModel>;
 	refresh: () => Promise<AppModel>;
 	refreshLogs: () => Promise<AppLogRefresh>;
+	openEditor: (worktreePath: string) => Promise<AppModel>;
+	openPullRequest: (worktreePath: string) => Promise<AppModel>;
+	deleteWorktree: (worktreePath: string) => Promise<AppModel>;
 }
 
 
@@ -159,6 +166,48 @@ async function stopRecordedSession(
 		throw new Error(`Failed to stop existing session pgid=${pgid}`);
 	}
 }
+async function launchDetachedCommand(command: string[], cwd: string): Promise<void> {
+	const {promise, resolve, reject} = Promise.withResolvers<void>();
+	let settled = false;
+	const child = spawn(command[0]!, command.slice(1), {cwd, detached: true, stdio: 'ignore'});
+	const finalize = (callback: () => void) => {
+		if (settled) {
+			return;
+		}
+		settled = true;
+		callback();
+	};
+	child.once('error', error => {
+		finalize(() => reject(error));
+	});
+	child.once('spawn', () => {
+		finalize(() => {
+			child.unref();
+			resolve();
+		});
+	});
+	await promise;
+}
+
+function getBrowserOpenCommand(url: string): string[] {
+	switch (process.platform) {
+		case 'darwin':
+			return ['open', url];
+		case 'win32':
+			return ['cmd', '/c', 'start', '', url];
+		default:
+			return ['xdg-open', url];
+	}
+}
+
+async function readSelectedWorktree(
+	workspaceRoot: string,
+	mainWorktreePath: string,
+	worktreePath: string,
+): Promise<WorktreeRow | null> {
+	const rows = await readWorktrees(workspaceRoot, mainWorktreePath);
+	return rows.find(row => row.path === worktreePath) ?? null;
+}
 
 export async function buildInitialModel(cwd: string): Promise<AppModel> {
 	const {workspaceRoot, mainWorktreePath, gitCommonDir} = await resolveRepoContext(cwd);
@@ -173,6 +222,7 @@ export async function buildInitialModel(cwd: string): Promise<AppModel> {
 		activeBranch: active?.branch ?? null,
 		status: active ? {kind: 'running', message: `Active: ${active.branch}`} : {kind: 'idle', message: 'ready'},
 		setupAvailable: config.setupCommand !== undefined,
+		editorAvailable: config.editorCommand !== undefined,
 		logs: await readLogs(paths.logsDir, active?.logPath ?? null),
 	};
 }
@@ -189,8 +239,7 @@ export async function buildActions(cwd: string): Promise<AppActions> {
 			readActive: async () => readSessionRecord(paths, {isSessionAlive: isProcessGroupAlive}),
 			readLogs: async logPath => readLogs(paths.logsDir, logPath),
 			readWorktreeBranch: async worktreePath => {
-				const rows = await readWorktrees(workspaceRoot, mainWorktreePath);
-				const selected = rows.find(row => row.path === worktreePath);
+				const selected = await readSelectedWorktree(workspaceRoot, mainWorktreePath, worktreePath);
 				if (!selected) {
 					throw new Error(`Worktree disappeared: ${worktreePath}`);
 				}
@@ -202,6 +251,48 @@ export async function buildActions(cwd: string): Promise<AppActions> {
 			stopSession: async active => stopRecordedSession(active.pgid, active.port, config.orphanMatchers),
 			clearSession: async () => clearSessionRecord(paths),
 			writeSession: async record => writeSessionRecord(paths, record),
+			openEditor: async worktreePath => {
+				const selected = await readSelectedWorktree(workspaceRoot, mainWorktreePath, worktreePath);
+				if (!selected) {
+					return {kind: 'idle', message: 'worktree no longer exists'};
+				}
+				if (config.editorCommand === undefined) {
+					return {kind: 'idle', message: 'editor command is not configured'};
+				}
+				await launchDetachedCommand([...config.editorCommand, worktreePath], worktreePath);
+				return {kind: 'idle', message: `opened editor for ${selected.branch}`};
+			},
+			openPullRequest: async worktreePath => {
+				const selected = await readSelectedWorktree(workspaceRoot, mainWorktreePath, worktreePath);
+				if (!selected) {
+					return {kind: 'idle', message: 'worktree no longer exists'};
+				}
+				const pullRequest = await readPullRequestInfo(worktreePath, selected.branch);
+				if (pullRequest.kind === 'none') {
+					return {kind: 'idle', message: `no pull request found for ${selected.branch}`};
+				}
+				if (pullRequest.kind === 'unavailable') {
+					return {kind: 'error', message: `pull request metadata is unavailable for ${selected.branch}`};
+				}
+				await launchDetachedCommand(getBrowserOpenCommand(pullRequest.url), worktreePath);
+				return {kind: 'idle', message: `opened pull request #${pullRequest.number} for ${selected.branch}`};
+			},
+			deleteWorktree: async worktreePath => {
+				const selected = await readSelectedWorktree(workspaceRoot, mainWorktreePath, worktreePath);
+				if (!selected) {
+					return {kind: 'idle', message: 'worktree no longer exists'};
+				}
+				if (selected.isMain) {
+					return {kind: 'idle', message: 'cannot delete the main worktree'};
+				}
+				const active = await readSessionRecord(paths, {isSessionAlive: isProcessGroupAlive});
+				if (active?.worktreePath === worktreePath) {
+					await stopRecordedSession(active.pgid, active.port, config.orphanMatchers);
+					await clearSessionRecord(paths);
+				}
+				await execFileAsync('git', ['worktree', 'remove', worktreePath], {cwd: workspaceRoot});
+				return {kind: 'idle', message: `deleted ${selected.branch}`};
+			},
 			nowIso: () => new Date().toISOString(),
 		},
 	});

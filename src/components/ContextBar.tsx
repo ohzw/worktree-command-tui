@@ -27,7 +27,14 @@ interface KeyHint {
 	label: string;
 }
 
-function buildKeyHints(setupAvailable: boolean): KeyHint[] {
+function buildKeyHints(setupAvailable: boolean, editorAvailable: boolean, confirmationOpen: boolean): KeyHint[] {
+	if (confirmationOpen) {
+		return [
+			{binding: 'd/y', label: 'Confirm'},
+			{binding: 'Esc/n/q', label: 'Cancel'},
+		];
+	}
+
 	const hints: KeyHint[] = [
 		{binding: '↑↓/jk', label: 'Move'},
 		{binding: 'Enter', label: 'Switch'},
@@ -35,8 +42,13 @@ function buildKeyHints(setupAvailable: boolean): KeyHint[] {
 	if (setupAvailable) {
 		hints.push({binding: 'i', label: 'Setup'});
 	}
+	if (editorAvailable) {
+		hints.push({binding: 'e', label: 'Editor'});
+	}
 
 	hints.push(
+		{binding: 'o', label: 'Open PR'},
+		{binding: 'd', label: 'Delete'},
 		{binding: 'L', label: 'Logs'},
 		{binding: 's', label: 'Stop'},
 		{binding: 'r', label: 'Refresh'},
@@ -47,9 +59,19 @@ function buildKeyHints(setupAvailable: boolean): KeyHint[] {
 	return hints;
 }
 
-export function ContextBar({status, setupAvailable}: {status: AppStatus; setupAvailable: boolean}) {
+export function ContextBar({
+	status,
+	setupAvailable,
+	editorAvailable,
+	confirmationOpen,
+}: {
+	status: AppStatus;
+	setupAvailable: boolean;
+	editorAvailable: boolean;
+	confirmationOpen: boolean;
+}) {
 	const isBusy = status.kind === 'setting-up' || status.kind === 'starting' || status.kind === 'stopping';
-	const keyHints = buildKeyHints(setupAvailable);
+	const keyHints = buildKeyHints(setupAvailable, editorAvailable, confirmationOpen);
 
 	return (
 		<Box borderStyle="round" borderColor={KIND_TO_COLOR[status.kind]} flexDirection="column" paddingX={1}>

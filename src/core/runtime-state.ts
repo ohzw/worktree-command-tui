@@ -1,6 +1,6 @@
 import path from 'node:path';
 import type {ToolConfig} from './config.js';
-import type {AppActions, AppLogEntry, AppLogRefresh, AppModel} from './runtime.js';
+import type {AppActions, AppLogEntry, AppLogRefresh, AppModel, AppStatus} from './runtime.js';
 import type {SessionPaths, SessionRecord} from './session-store.js';
 
 export interface StartedCommand {
@@ -20,6 +20,9 @@ export interface RuntimeStateAdapter {
 	stopSession: (active: SessionRecord) => Promise<void>;
 	clearSession: () => Promise<void>;
 	writeSession: (record: SessionRecord) => Promise<void>;
+	openEditor: (worktreePath: string) => Promise<AppStatus>;
+	openPullRequest: (worktreePath: string) => Promise<AppStatus>;
+	deleteWorktree: (worktreePath: string) => Promise<AppStatus>;
 	nowIso: () => string;
 }
 
@@ -40,6 +43,24 @@ export function createRuntimeStateActions({config, paths, adapter}: RuntimeState
 			logs: await adapter.readLogs(active?.logPath ?? null),
 			activePath: active?.worktreePath ?? null,
 			activeBranch: active?.branch ?? null,
+		};
+	};
+
+	const refreshWithStatus = async (
+		run: () => Promise<AppStatus>,
+		preserveRunningStatus: boolean,
+	): Promise<AppModel> => {
+		const status = await run();
+		const model = await adapter.refresh();
+		if (preserveRunningStatus && model.activePath !== null && status.kind === 'idle') {
+			return {
+				...model,
+				status: {kind: 'running', message: status.message},
+			};
+		}
+		return {
+			...model,
+			status,
 		};
 	};
 
@@ -145,5 +166,9 @@ export function createRuntimeStateActions({config, paths, adapter}: RuntimeState
 		};
 	};
 
-	return {setup, start, stop, refresh: adapter.refresh, refreshLogs};
+	const openEditor = async (worktreePath: string): Promise<AppModel> => refreshWithStatus(() => adapter.openEditor(worktreePath), true);
+	const openPullRequest = async (worktreePath: string): Promise<AppModel> => refreshWithStatus(() => adapter.openPullRequest(worktreePath), true);
+	const deleteWorktree = async (worktreePath: string): Promise<AppModel> => refreshWithStatus(() => adapter.deleteWorktree(worktreePath), false);
+
+	return {setup, start, stop, refresh: adapter.refresh, refreshLogs, openEditor, openPullRequest, deleteWorktree};
 }

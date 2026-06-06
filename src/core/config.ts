@@ -6,6 +6,7 @@ export interface ToolConfig {
 	namespace: string;
 	command: string[];
 	setupCommand?: string[];
+	editorCommand?: string[];
 	port: number;
 	requiredFiles: string[];
 	orphanMatchers: string[];

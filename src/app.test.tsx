@@ -49,10 +49,10 @@ it('uses alternate screen and incremental rendering options', () => {
 	expect(APP_RENDER_OPTIONS).toEqual({alternateScreen: true, exitOnCtrlC: true, incrementalRendering: true});
 });
 
-it('never grows the shell beyond the available terminal viewport', () => {
-	expect(getShellDimensions(8, 8)).toEqual({rootWidth: 8, rootHeight: 8, bodyWidth: 4, listWidth: 1, actionWidth: 2});
-	expect(getShellDimensions(45, 12)).toEqual({rootWidth: 45, rootHeight: 12, bodyWidth: 41, listWidth: 13, actionWidth: 27});
-	expect(getShellDimensions(100, 30)).toEqual({rootWidth: 100, rootHeight: 30, bodyWidth: 96, listWidth: 32, actionWidth: 63});
+it('uses the full terminal width for pane layout', () => {
+	expect(getShellDimensions(8, 8)).toEqual({rootWidth: 8, rootHeight: 8, bodyWidth: 8, listWidth: 1, actionWidth: 6});
+	expect(getShellDimensions(45, 12)).toEqual({rootWidth: 45, rootHeight: 12, bodyWidth: 45, listWidth: 14, actionWidth: 30});
+	expect(getShellDimensions(100, 30)).toEqual({rootWidth: 100, rootHeight: 30, bodyWidth: 100, listWidth: 33, actionWidth: 66});
 });
 
 it('parses SGR mouse wheel events', () => {
@@ -86,9 +86,9 @@ it('switches to stacked and minimal layouts at the expected breakpoints', () => 
 	expect(shouldUseCompactLayout(90, 22, 3)).toBe(false);
 	expect(shouldUseCompactLayout(30, 30, 1)).toBe(false);
 	expect(shouldUseCompactLayout(120, 30, 3)).toBe(false);
-	expect(shouldStackPanes(90, 28, 3)).toBe(false);
-	expect(shouldStackPanes(90, 29, 3)).toBe(true);
-	expect(shouldStackPanes(90, 30, 3)).toBe(true);
+	expect(shouldStackPanes(90, 26, 3)).toBe(false);
+	expect(shouldStackPanes(90, 27, 3)).toBe(true);
+	expect(shouldStackPanes(90, 28, 3)).toBe(true);
 	expect(shouldStackPanes(120, 40, 3)).toBe(false);
 });
 
@@ -481,7 +481,7 @@ it('scrolls selection details when the pane is height constrained', async () => 
 		activeBranch: 'feat/a',
 	});
 	const {lastFrame, stdin} = render(
-		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 16}} />,
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 15}} />,
 	);
 	expect(lastFrame()).toContain('[Identity]');
 	expect(lastFrame()).toContain('█');
@@ -508,7 +508,7 @@ it('scrolls selection details with SGR mouse wheel input', async () => {
 		activeBranch: 'feat/a',
 	});
 	const {lastFrame, stdin} = render(
-		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 16}} />,
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 15}} />,
 	);
 	expect(lastFrame()).not.toContain('Full Path: /repo/.worktree/feat-a');
 	stdin.write('\u001B[<65;80;10M');
@@ -533,7 +533,7 @@ it('scrolls worktree list with SGR mouse wheel input', async () => {
 	);
 	expect(stripAnsi(lastFrame())).not.toContain('feat-8');
 	expect(stripAnsi(lastFrame())).toContain('│ > * feat-0');
-	stdin.write('\u001B[<65;10;10M');
+	stdin.write('\u001B[<65;1;6M');
 	await waitForInput();
 	await waitForInput();
 	expect(stripAnsi(lastFrame())).toContain('│   - feat-3');
@@ -560,10 +560,10 @@ it('scrolls selection details with SGR mouse wheel in tall split layout', async 
 		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 34}} />,
 	);
 	expect(lastFrame()).not.toContain('Already active. Press s to stop the current session.');
-	stdin.write('\u001B[<65;90;12M');
+	stdin.write(`\u001B[<65;${getShellDimensions(120, 34).listWidth + 2};6M`);
 	await waitForInput();
 	await waitForInput();
-	stdin.write('\u001B[<65;90;12M');
+	stdin.write(`\u001B[<65;${getShellDimensions(120, 34).listWidth + 2};6M`);
 	await waitForInput();
 	await waitForInput();
 	expect(lastFrame()).toContain('Already active. Press s to stop the current session.');
@@ -581,11 +581,78 @@ it('scrolls the log pane with SGR mouse wheel input', async () => {
 		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 40}} />,
 	);
 	expect(lastFrame()).toContain('row-12');
-	stdin.write('\u001B[<64;80;30M');
+	stdin.write('\u001B[<64;80;36M');
 	await waitForInput();
 	await waitForInput();
 	expect(lastFrame()).toContain('row-04');
 	expect(lastFrame()).not.toContain('row-12');
+});
+
+it('routes stacked-layout mouse wheel input by pane position', async () => {
+	const rows: AppModel['rows'] = [
+		{
+			path: '/repo/.worktree/feat-0',
+			shortPath: '.worktree/feat-0',
+			branch: 'feat-0',
+			tags: ['active'],
+			headSha: '46af3f1c',
+			upstream: {branch: 'origin/develop', ahead: 4, behind: 24},
+			workingTree: {staged: 1, unstaged: 2, untracked: 3, conflicts: 0},
+			pullRequest: {kind: 'found', number: 2125, title: 'Selection pane metadata', url: 'https://github.com/finn-inc/reclaim-the-forest/pull/2125', state: 'OPEN', isDraft: true, baseBranch: 'develop'},
+		},
+		...Array.from({length: 11}, (_, index) => ({
+			path: `/repo/.worktree/feat-${index + 1}`,
+			shortPath: `.worktree/feat-${index + 1}`,
+			branch: `feat-${index + 1}`,
+			tags: [] as RowTag[],
+		})),
+	];
+	const model = createModel({
+		rows,
+		activePath: '/repo/.worktree/feat-0',
+		activeBranch: 'feat-0',
+	});
+	const {lastFrame, stdin} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 90, rows: 30}} />,
+	);
+	expect(stripAnsi(lastFrame())).not.toContain('feat-8');
+	expect(lastFrame()).not.toContain('PR Title: Selection pane metadata');
+	stdin.write('\u001B[<65;10;6M');
+	await waitForInput();
+	await waitForInput();
+	expect(stripAnsi(lastFrame())).toContain('feat-3');
+	expect(lastFrame()).not.toContain('PR Title: Selection pane metadata');
+	stdin.write('\u001B[<65;10;16M');
+	await waitForInput();
+	await waitForInput();
+	stdin.write('\u001B[<65;10;16M');
+	await waitForInput();
+	await waitForInput();
+	expect(lastFrame()).toContain('PR Title: Selection pane metadata');
+});
+
+it('ignores mouse wheel input over header and footer chrome', async () => {
+	const model = createModel({
+		rows: Array.from({length: 12}, (_, index) => ({
+			path: `/repo/.worktree/feat-${index}`,
+			shortPath: `.worktree/feat-${index}`,
+			branch: `feat-${index}`,
+			tags: index === 0 ? ['active'] : [],
+		})),
+		activePath: '/repo/.worktree/feat-0',
+		activeBranch: 'feat-0',
+	});
+	const {lastFrame, stdin} = render(
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 16}} />,
+	);
+	const initialFrame = stripAnsi(lastFrame() ?? '');
+	stdin.write('\u001B[<65;10;1M');
+	await waitForInput();
+	await waitForInput();
+	stdin.write('\u001B[<65;10;15M');
+	await waitForInput();
+	await waitForInput();
+	expect(stripAnsi(lastFrame() ?? '')).toBe(initialFrame);
 });
 
 it('renders a minimal fallback shell on very short terminals', () => {
@@ -661,7 +728,10 @@ it('truncates long branch labels in the worktree pane', () => {
 		activeBranch: null,
 	});
 	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />);
-	expect(stripAnsi(lastFrame())).toContain('feature/this-is-a-very-long-br…');
+	const branchLine = stripAnsi(lastFrame()).split('\n').find(line => line.includes('feature/this-is-a-very-long-')) ?? '';
+	expect(branchLine).toContain('feature/this-is-a-very-long-');
+	expect(branchLine).toContain('…');
+	expect(branchLine).not.toContain('feature/this-is-a-very-long-branch-name-that-wraps');
 });
 
 it('truncates long branch and path values in the selection pane', () => {
@@ -676,9 +746,16 @@ it('truncates long branch and path values in the selection pane', () => {
 		activeBranch: null,
 	});
 	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />);
-	expect(lastFrame()).toContain('Branch: feature/this-is-a-very-long-branch-name-that-wraps-and-keeps-go…');
-	expect(lastFrame()).toContain('Path: .worktree/feature/long');
-	expect(lastFrame()).toContain('Full Path: /repo/.worktree/feature/this/is/a/very/long/path/that/keeps/…');
+	const frame = lastFrame() ?? '';
+	const branchLine = frame.split('\n').find(line => line.includes('Branch: feature/this-is-a-very-long-')) ?? '';
+	expect(branchLine).toContain('Branch: feature/this-is-a-very-long-');
+	expect(branchLine).toContain('…');
+	expect(branchLine).not.toContain('Branch: feature/this-is-a-very-long-branch-name-that-wraps-and-keeps-going-past-the-panel-width');
+	expect(frame).toContain('Path: .worktree/feature/long');
+	const fullPathLine = frame.split('\n').find(line => line.includes('Full Path: /repo/.worktree/feature/')) ?? '';
+	expect(fullPathLine).toContain('Full Path: /repo/.worktree/feature/');
+	expect(fullPathLine).toContain('…');
+	expect(fullPathLine).not.toContain('Full Path: /repo/.worktree/feature/this/is/a/very/long/path/that/keeps/going/until/the/panel/would/wrap');
 });
 it('shows git and PR metadata in the selection pane', () => {
 	const model = createModel({

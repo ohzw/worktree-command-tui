@@ -1,20 +1,27 @@
 # worktree-command-tui
 
-`worktree-command-tui` is a terminal UI (TUI) tool for operating multiple Git worktrees from one repository.
-It helps you inspect, start, and stop per-worktree processes with quick keyboard-driven workflows.
+`worktree-command-tui` is a terminal UI for managing Git worktrees from inside a repository.
+It keeps one active runtime session per namespace, lets you switch worktrees with the keyboard, and keeps logs/process cleanup tied to the repo's shared Git state.
 
 ## Features
 
-- List and monitor worktrees for the current repository
-- Start/stop worktree-specific commands
-- Keep process handling centralized for each session
-- Persist namespace-aware runtime state
-- Support JSONC config (with comments and trailing commas)
+- Discover worktrees from the current repository even when launched from a subdirectory
+- Start or switch the active worktree session with `Enter`
+- Stop the active session and clean up recorded orphan processes with `s`
+- Run an optional per-worktree setup command with `i`
+- Open the selected worktree in your editor with `e`
+- Open the selected branch's pull request in a browser with `o`
+- Delete a non-root worktree from the TUI with `d`, then confirm
+- Inspect branch, upstream, working tree, and pull request metadata in the detail pane
+- Tail ANSI-colored logs inline or in a full-screen log view
+- Generate and load JSONC config with comments and trailing commas
 
 ## Requirements
 
 - Node.js `>=20`
-- A Git repository in the target working directory
+- Git
+- A Git repository (additional linked worktrees optional)
+- Optional: GitHub CLI (`gh`) and a GitHub origin remote for pull request metadata and `o` / Open PR
 
 ## Installation
 
@@ -22,19 +29,24 @@ It helps you inspect, start, and stop per-worktree processes with quick keyboard
 npm install -g @ohzw/worktree-command-tui
 ```
 
-## Usage
+Installed binaries:
 
-### 1) Initialize configuration
+- `wctui`
+- `worktree-command-tui` (compatibility alias)
 
-Run this once in a repository root (or any subdirectory of the repository):
+## Quick start
+
+### 1) Initialize config
+
+Run this from the repo root or any subdirectory inside the repo:
 
 ```bash
 wctui init
 ```
 
-This creates `.worktree-command-tui.jsonc` with a sensible default configuration.
+This writes `.worktree-command-tui.jsonc` at the repository root.
 
-To regenerate an existing configuration:
+To overwrite an existing config:
 
 ```bash
 wctui init --force
@@ -46,46 +58,82 @@ wctui init --force
 wctui
 ```
 
-`worktree-command-tui` is still available as a compatibility alias.
+If config is missing, the CLI exits with a message telling you to run `wctui init`.
 
-If no configuration file is found, the CLI will prompt you to run `wctui init`.
+## Keyboard shortcuts
+
+Primary shortcuts in the footer:
+
+- `↑↓` / `j` `k` — move selection
+- `Enter` — start or switch to selected worktree
+- `i` — run `setupCommand` when configured
+- `e` — open the selected worktree in the configured editor when `editorCommand` is configured
+- `o` — open the selected worktree's pull request when GitHub metadata is available
+- `d` — arm worktree deletion
+- `L` — open full-screen logs
+- `s` — stop active session
+- `r` — refresh worktree metadata
+- `?` — show help
+- `q` — quit
+
+Additional shortcuts from the help window:
+
+- `g` / `G` — jump to first / last worktree
+- `[` / `]` — scroll logs
+- `PageUp` / `PageDn` — page the selection list
+- Mouse wheel — scroll the pane under the cursor
+- `d` / `y` — confirm delete after arming it
+- `Esc` / `n` / `q` — cancel delete confirmation
 
 ## Configuration
 
-The tool reads these files in this order:
+The tool looks for config in this order:
 
 1. `.worktree-command-tui.jsonc`
 2. `.worktree-command-tui.json`
 
-A minimal example of the generated config:
+Example config:
 
 ```jsonc
 {
-  // Session namespace used for logs/state
+  // Session namespace used for git-common-dir state files and logs.
   "namespace": "worktree-command-tui",
-  // Command executed in each selected worktree
-  "command": ["npm", "run", "start"],
-  // Optional setup command run manually in the selected worktree
+
+  // Command launched in the selected worktree.
+  "command": ["npm", "run", "dev"],
+
+  // Optional command run manually with the setup key in the selected worktree.
   "setupCommand": ["npm", "install"],
-  // Port used for cleanup/monitoring
+
+  // Optional command that opens the selected worktree path in an editor.
+  // The selected worktree path is appended as the final argv entry.
+  "editorCommand": ["code"],
+
+  // TCP port owned by the command, used when stopping stale/orphaned processes.
   "port": 3000,
-  // Required files that must exist in a worktree
+
+  // Files that must exist in a worktree before the command can be started there.
   "requiredFiles": ["package.json"],
-  // Optional command substrings considered orphaned processes
+
+  // Extra process command-line substrings treated as orphans for cleanup.
   "orphanMatchers": []
 }
 ```
 
-When `setupCommand` is configured, press `i` in the TUI to run it for the selected worktree.
-It is never run automatically when switching worktrees.
+Notes:
+
+- `setupCommand` is optional and never runs automatically; `i` only appears when it is configured
+- `editorCommand` is optional; when set, the selected worktree path is appended to the argv and `e` becomes available
+- The generated default config auto-detects package manager hints from `packageManager` or common lockfiles and chooses a default script such as `dev`, `start`, or `serve`
+- Session records and logs are stored under the repository's Git common dir, so they are shared across worktrees in the same repo
 
 ## Development
 
 ```bash
 npm install
-npm run test          # Run test suite
-npm run typecheck     # Run TypeScript type-check
-npm run build         # Build distributable output to dist/
+npm test
+npm run typecheck
+npm run build
 ```
 
 ## License

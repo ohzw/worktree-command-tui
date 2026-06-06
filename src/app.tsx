@@ -78,10 +78,12 @@ export function shouldUseMinimalLayout(columns: number, rows: number): boolean {
 	return columns < 20 || rows < 10;
 }
 
-export function shouldStackPanes(columns: number, rows: number, worktreeCount = 0): boolean {
-	// Stacked panes are taller than split panes. Only use them when the full frame can fit the viewport.
-	const minimumRows = Math.max(36, worktreeCount + 34);
-	return columns < 96 && rows >= minimumRows;
+const STACKED_LAYOUT_FRAME_ROWS = 11;
+const MIN_STACKED_PANE_HEIGHT = 9;
+
+export function shouldStackPanes(columns: number, rows: number, _worktreeCount = 0): boolean {
+	// Each stacked pane includes its own border and title. At 9 rows, both panes still keep ~6 visible content lines.
+	return columns < 96 && rows >= STACKED_LAYOUT_FRAME_ROWS + (MIN_STACKED_PANE_HEIGHT * 2);
 }
 
 function getLogPaneHeight(_rootHeight: number): number {
@@ -246,10 +248,10 @@ export function App({
 	const compactDetailPane = !stackedLayout && rootHeight <= 30 && model.rows.length > 1;
 	const showLogPanel = !stackedLayout && rootHeight >= 34;
 	const logPaneHeight = showLogPanel ? getLogPaneHeight(rootHeight) : 0;
-	const stackedPaneHeight = Math.max(3, Math.floor((rootHeight - 11) / 2));
+	const stackedPaneHeight = Math.max(3, Math.floor((rootHeight - STACKED_LAYOUT_FRAME_ROWS) / 2));
 	const paneHeight = stackedLayout
 		? stackedPaneHeight
-		: Math.max(3, rootHeight - 11 - logPaneHeight);
+		: Math.max(3, rootHeight - STACKED_LAYOUT_FRAME_ROWS - logPaneHeight);
 	const selectionScrollPageSize = Math.max(1, Math.floor(paneHeight / 2));
 	const logLineCount = useMemo(() => buildLogLines(model.logs).length, [model.logs]);
 	const logViewportHeight = isLogOverlayOpen

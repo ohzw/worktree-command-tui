@@ -1,5 +1,6 @@
 import {Box, Text} from 'ink';
 import type {AppLogEntry} from '../core/runtime.js';
+import {sanitizeInlineText} from '../core/worktree-projection.js';
 import {getScrollbarThumbRows, sliceTailViewport} from '../terminal/viewport.js';
 
 const ESCAPE = '\u001B';
@@ -268,7 +269,7 @@ export function buildLogLines(logs: AppLogEntry[]): LineSpec[] {
 		if (index > 0) {
 			lines.push(plainLine(' ', {dimColor: true}));
 		}
-		lines.push(plainLine(`[${log.name}]`, {color: 'cyan'}));
+		lines.push(plainLine(`[${sanitizeInlineText(log.name)}]`, {color: 'cyan'}));
 		lines.push(...parseLogContent(log.content.length > 0 ? log.content : '(empty)'));
 	}
 

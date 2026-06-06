@@ -65,6 +65,14 @@ describe('projectNote', () => {
 		expect(projectNote(makeRow({workingTree: {staged: 0, unstaged: 0, untracked: 0, conflicts: 1}}))).toEqual({kind: 'ready', severity: 'error'});
 		expect(projectNote(makeRow())).toEqual({kind: 'ready', severity: 'info'});
 	});
+
+	it('sanitizes invalid reasons before projecting them for display', () => {
+		expect(projectNote(makeRow({invalidReason: 'Missing\u001b]0;owned\u0007\npackage.json\u202E'}))).toEqual({
+			kind: 'invalid',
+			severity: 'error',
+			invalidReason: 'Missing package.json',
+		});
+	});
 });
 
 describe('projectUpstream', () => {

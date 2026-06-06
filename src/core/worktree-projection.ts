@@ -56,8 +56,17 @@ const tagPriority: Record<string, number> = {
 	invalid: 3,
 };
 
+const ANSI_CSI_PATTERN = /\u001B\[[0-?]*[ -/]*[@-~]/gu;
+const ANSI_OSC_PATTERN = /\u001B\][^\u0007\u001B\u009C]*(?:\u0007|\u001B\\|\u009C)?/gu;
+const ANSI_STRING_PATTERN = /\u001B[P^_X][\s\S]*?(?:\u001B\\|\u009C|$)/gu;
+const C1_STRING_PATTERN = /[\u0090\u0098\u009D\u009E\u009F][^\u0007\u009C]*(?:\u0007|\u009C)?/gu;
+
 export function sanitizeInlineText(value: string): string {
 	return value
+		.replace(ANSI_OSC_PATTERN, '')
+		.replace(ANSI_STRING_PATTERN, '')
+		.replace(C1_STRING_PATTERN, '')
+		.replace(ANSI_CSI_PATTERN, '')
 		.replace(/[\r\n\t\u2028\u2029]+/g, ' ')
 		.replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
 		.replace(/\p{Cf}/gu, '')
@@ -119,7 +128,7 @@ export function projectAction(row: AppRow, activePath: string | null): ActionPro
 
 export function projectNote(row: AppRow): NoteProjection {
 	if (row.invalidReason) {
-		return {kind: 'invalid', severity: 'error', invalidReason: row.invalidReason};
+		return {kind: 'invalid', severity: 'error', invalidReason: sanitizeInlineText(row.invalidReason)};
 	}
 	if (hasTag(row, 'external')) {
 		return {kind: 'external', severity: 'info'};

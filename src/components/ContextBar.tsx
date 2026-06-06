@@ -1,6 +1,7 @@
 import React from 'react';
 import {Box, Text} from 'ink';
 import {Spinner} from '@inkjs/ui';
+import {sanitizeInlineText} from '../core/worktree-projection.js';
 import type {AppStatus} from '../core/runtime.js';
 
 const KIND_TO_ICON: Record<AppStatus['kind'], 'ℹ' | '⚠' | '✓' | '✘'> = {
@@ -72,14 +73,15 @@ export function ContextBar({
 }) {
 	const isBusy = status.kind === 'setting-up' || status.kind === 'starting' || status.kind === 'stopping';
 	const keyHints = buildKeyHints(setupAvailable, editorAvailable, confirmationOpen);
+	const statusMessage = sanitizeInlineText(status.message);
 
 	return (
 		<Box borderStyle="round" borderColor={KIND_TO_COLOR[status.kind]} flexDirection="column" paddingX={1}>
 			{isBusy ? (
-				<Spinner label={`Status: ${status.kind} — ${status.message}`} />
+				<Spinner label={`Status: ${status.kind} — ${statusMessage}`} />
 			) : (
 				<Text color={KIND_TO_COLOR[status.kind]} wrap="truncate-end">
-					{KIND_TO_ICON[status.kind]} Status: {status.kind} — {status.message}
+					{KIND_TO_ICON[status.kind]} Status: {status.kind} — {statusMessage}
 				</Text>
 			)}
 			<Text wrap="truncate-end">

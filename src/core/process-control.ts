@@ -1,7 +1,7 @@
 export interface CleanupDeps {
 	killProcessGroup: (pgid: number, signal?: NodeJS.Signals) => Promise<void>;
-	killPortOwner: (port: number) => Promise<void>;
-	killOrphans: (matcher: string) => Promise<void>;
+	killPortOwner: (port: number, pgid: number) => Promise<void>;
+	killOrphans: (matcher: string, pgid: number) => Promise<void>;
 	isSessionAlive: (pgid: number) => Promise<boolean>;
 }
 
@@ -9,14 +9,17 @@ export async function stopSessionWithFallback(
 	input: {pgid: number; port: number; orphanMatchers: string[]},
 	deps: CleanupDeps,
 ): Promise<boolean> {
+	if (input.pgid <= 1) {
+		return false;
+	}
 	await deps.killProcessGroup(input.pgid, 'SIGTERM');
 	if (!(await deps.isSessionAlive(input.pgid))) {
 		return true;
 	}
 
-	await deps.killPortOwner(input.port);
+	await deps.killPortOwner(input.port, input.pgid);
 	for (const matcher of input.orphanMatchers) {
-		await deps.killOrphans(matcher);
+		await deps.killOrphans(matcher, input.pgid);
 	}
 	if (!(await deps.isSessionAlive(input.pgid))) {
 		return true;

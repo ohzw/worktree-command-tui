@@ -1,8 +1,9 @@
 import path from 'node:path';
-import {readdir, readFile, stat} from 'node:fs/promises';
+import {open, readdir, stat} from 'node:fs/promises';
 
 const MAX_LOG_BYTES = 16 * 1024;
 const MAX_LOG_LINES = 120;
+const MAX_LOG_FILES = 100;
 
 export interface LogEntry {
 	name: string;
@@ -17,10 +18,25 @@ export function tailLogContent(content: string): string {
 	return tailLines.join('\n').trimEnd();
 }
 
+async function readLogTail(filePath: string): Promise<string> {
+	const stats = await stat(filePath);
+	const bytesToRead = Math.min(stats.size, MAX_LOG_BYTES);
+	const buffer = Buffer.alloc(bytesToRead);
+	const file = await open(filePath, 'r');
+	try {
+		await file.read(buffer, 0, bytesToRead, Math.max(0, stats.size - bytesToRead));
+	} finally {
+		await file.close();
+	}
+	return buffer.toString('utf8');
+}
+
+
 export async function readLogs(logsDir: string, activeLogPath: string | null): Promise<LogEntry[]> {
 	try {
 		const entries = (await readdir(logsDir, {withFileTypes: true}))
 			.filter(entry => entry.isFile() && entry.name.endsWith('.log'))
+			.slice(0, MAX_LOG_FILES)
 			.map(entry => ({name: entry.name, path: path.join(logsDir, entry.name)}));
 
 		if (entries.length === 0) {
@@ -30,8 +46,9 @@ export async function readLogs(logsDir: string, activeLogPath: string | null): P
 		let selectedEntries = entries;
 		if (activeLogPath !== null) {
 			const activeEntry = entries.find(entry => entry.path === activeLogPath);
-			if (activeEntry) {
-				selectedEntries = [activeEntry];
+			selectedEntries = activeEntry ? [activeEntry] : [];
+			if (selectedEntries.length === 0) {
+				return [];
 			}
 		} else {
 			const withStats = await Promise.all(
@@ -48,7 +65,7 @@ export async function readLogs(logsDir: string, activeLogPath: string | null): P
 			selectedEntries.map(async entry => ({
 				name: entry.name,
 				path: entry.path,
-				content: tailLogContent(await readFile(entry.path, 'utf8')),
+				content: tailLogContent(await readLogTail(entry.path)),
 			})),
 		);
 	} catch {

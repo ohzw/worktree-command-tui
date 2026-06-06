@@ -77,6 +77,13 @@ describe('validateToolConfig', () => {
 		);
 	});
 
+	it('rejects broad orphan matchers that could target unrelated processes', () => {
+		expect(() => validateToolConfig({...validConfig, orphanMatchers: ['node']})).toThrow(
+			'orphanMatchers entries must include a command plus argument fragment',
+		);
+		expect(() => validateToolConfig({...validConfig, orphanMatchers: ['vite --host']})).not.toThrow();
+	});
+
 	it('rejects ports outside the tcp range', () => {
 		expect(() => validateToolConfig({...validConfig, port: 0})).toThrow(
 			'port must be an integer between 1 and 65535',

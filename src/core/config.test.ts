@@ -95,4 +95,19 @@ describe('loadToolConfig', () => {
 
 		await expect(loadToolConfig({repoRoot: root})).rejects.toThrow('port must be an integer between 1 and 65535');
 	});
+
+	it('rejects oversized config files before parsing them', async () => {
+		const root = mkdtempSync(path.join(tmpdir(), 'wctui-config-large-'));
+		writeFileSync(
+			path.join(root, CONFIG_FILE_NAME),
+			JSON.stringify({
+				namespace: 'rojo-serve',
+				command: ['npm', 'run', 'serve'],
+				port: 34872,
+				requiredFiles: ['x'.repeat(100000)],
+			}),
+		);
+
+		await expect(loadToolConfig({repoRoot: root})).rejects.toThrow('config file is too large');
+	});
 });

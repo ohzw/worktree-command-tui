@@ -5,7 +5,7 @@ import {describe, expect, it} from 'vitest';
 import {runCommandToLog, startDetachedCommand} from './command-runner.js';
 
 async function waitForLogContent(logPath: string, expected: string): Promise<void> {
-	for (let attempt = 0; attempt < 20; attempt += 1) {
+	for (let attempt = 0; attempt < 100; attempt += 1) {
 		try {
 			if (readFileSync(logPath, 'utf8').includes(expected)) {
 				return;
@@ -95,6 +95,7 @@ describe('runCommandToLog', () => {
 		}
 	});
 
+
 	it('asks detached commands to keep color when writing to log files', async () => {
 		const root = mkdtempSync(path.join(tmpdir(), 'wctui-command-detached-color-'));
 		const previousForceColor = process.env.FORCE_COLOR;
@@ -154,6 +155,7 @@ describe('runCommandToLog', () => {
 			}
 		}
 	});
+
 
 	it('rejects with the exit code and log path when the command fails', async () => {
 		const root = mkdtempSync(path.join(tmpdir(), 'wctui-command-fail-'));

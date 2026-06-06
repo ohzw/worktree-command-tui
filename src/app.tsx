@@ -10,6 +10,7 @@ import {LogPanel, buildLogLines} from './components/LogPanel.js';
 import {WorktreeList} from './components/WorktreeList.js';
 import type {AppActions, AppLogRefresh, AppModel, AppRow, AppStatus, RowTag} from './core/runtime.js';
 import {clampSelectionIndex, decideEnterInteraction, decideSetupInteraction, getNextSelectedPath, getSelectedIndex} from './core/tui-interaction.js';
+import {sanitizeInlineText} from './core/worktree-projection.js';
 
 export interface ShellDimensions {
 	rootWidth: number;
@@ -619,6 +620,12 @@ export function App({
 		);
 	}
 
+	const safeActiveBranch = model.activeBranch === null ? '-' : sanitizeInlineText(model.activeBranch);
+	const safeSelectedBranch = selected === undefined ? '-' : sanitizeInlineText(selected.branch);
+	const safeVisibleStatusMessage = sanitizeInlineText(visibleStatus.message);
+	const safeModelStatusMessage = sanitizeInlineText(model.status.message);
+	const safeCompletedAlert = completedAlert === null ? null : sanitizeInlineText(completedAlert);
+
 	if (isLogOverlayOpen) {
 		return (
 			<FloatingLogWindow
@@ -634,10 +641,10 @@ export function App({
 		return (
 			<Box width={rootWidth} height={rootHeight} flexDirection="column">
 				<Text bold color="green" wrap="truncate-end">
-					A:{model.activeBranch ?? '-'}
+					A:{safeActiveBranch}
 				</Text>
-				{rootHeight >= 2 ? <Text wrap="truncate-end">S:{selected?.branch ?? '-'}</Text> : null}
-				{rootHeight >= 3 ? <Text wrap="truncate-end">{confirmationOpen ? `D:${visibleStatus.message}` : `T:${model.status.kind}`}</Text> : null}
+				{rootHeight >= 2 ? <Text wrap="truncate-end">S:{safeSelectedBranch}</Text> : null}
+				{rootHeight >= 3 ? <Text wrap="truncate-end">{confirmationOpen ? `D:${safeVisibleStatusMessage}` : `T:${model.status.kind}`}</Text> : null}
 				{rootHeight >= 4 ? (
 					confirmationOpen
 						? <Text dimColor wrap="truncate-end">d/y confirm · Esc/n/q cancel</Text>
@@ -651,15 +658,15 @@ export function App({
 		return (
 			<Box width={rootWidth} height={rootHeight} flexDirection="column">
 				<Text bold color="green" wrap="truncate-end">
-					Active: {model.activeBranch ?? '-'}
+					Active: {safeActiveBranch}
 				</Text>
-				<Text wrap="truncate-end">Selected: {selected?.branch ?? '-'}</Text>
-				{completedAlert
-					? <Text color="green" wrap="truncate-end">✔ {completedAlert}</Text>
+				<Text wrap="truncate-end">Selected: {safeSelectedBranch}</Text>
+				{safeCompletedAlert
+					? <Text color="green" wrap="truncate-end">✔ {safeCompletedAlert}</Text>
 					: model.status.kind === 'setting-up' || model.status.kind === 'starting' || model.status.kind === 'stopping' ? (
-						<Spinner label={`Status: ${model.status.kind} — ${model.status.message}`} />
+						<Spinner label={`Status: ${model.status.kind} — ${safeModelStatusMessage}`} />
 					) : (
-						<Text wrap="truncate-end">Status: {visibleStatus.kind} — {visibleStatus.message}</Text>
+						<Text wrap="truncate-end">Status: {visibleStatus.kind} — {safeVisibleStatusMessage}</Text>
 					)}
 				<Text dimColor wrap="truncate-end">
 					{confirmationOpen
@@ -686,9 +693,9 @@ export function App({
 			</Box>
 			{showLogPanel ? <LogPanel logs={model.logs} width={bodyWidth} height={logPaneHeight} scrollOffset={logScrollOffset} /> : null}
 			<ContextBar status={visibleStatus} setupAvailable={model.setupAvailable} editorAvailable={model.editorAvailable} confirmationOpen={confirmationOpen} />
-			{completedAlert ? (
+			{safeCompletedAlert ? (
 				<Box position="absolute" top={1} right={2}>
-					<Alert variant="success">{completedAlert}</Alert>
+					<Alert variant="success">{safeCompletedAlert}</Alert>
 				</Box>
 			) : null}
 		</Box>

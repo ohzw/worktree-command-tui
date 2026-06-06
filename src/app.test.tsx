@@ -40,9 +40,9 @@ function createModel(overrides: Partial<AppModel> = {}): AppModel {
 }
 
 async function waitForInput(): Promise<void> {
-	const {promise, resolve} = Promise.withResolvers<void>();
-	setImmediate(resolve);
-	await promise;
+	await new Promise(resolve => {
+		setTimeout(resolve, 10);
+	});
 }
 function stripAnsi(value: string | null | undefined): string {
 	return (value ?? '').replace(/\u001B\[[0-9;]*m/g, '');
@@ -748,6 +748,22 @@ it('renders a minimal fallback shell on extremely small terminals', () => {
 	expect(lastFrame()).toContain('↑↓jk↵eo…');
 });
 
+it('sanitizes branch and status text in the minimal fallback shell', () => {
+	const model = createModel({
+		rows: [{path: '/repo', shortPath: '.', branch: 'feat/\u001b[2Jbad\u202E', tags: ['main']}],
+		activePath: '/repo',
+		activeBranch: 'feat/\u001b]0;owned\u0007active\u202E',
+		status: {kind: 'error', message: 'bad\u001b]0;owned\u0007\nstatus\u202E'},
+	});
+	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 30, rows: 4}} />);
+	expect(lastFrame()).toContain('A:feat/active');
+	expect(lastFrame()).toContain('S:feat/bad');
+	expect(lastFrame()).not.toContain('\u001b');
+	expect(lastFrame()).not.toContain('owned');
+	expect(lastFrame()).not.toContain('\u202E');
+});
+
+
 it('keeps the active branch visible when header metadata is long', () => {
 	const model = createModel({
 		repoName: 'reclaim-the-forest-with-a-long-name',
@@ -894,7 +910,7 @@ it('sanitizes PR titles before rendering them into the terminal', () => {
 	expect(lastFrame()).toContain('Full Path: /repo/.worktree/feat-a next');
 	expect(lastFrame()).toContain('Upstream: origin/devel op (↑1 ↓2)');
 	expect(lastFrame()).toContain('PR: #2125 open → develop');
-	expect(lastFrame()).toContain('PR Title: bad line[2J more rtl');
+	expect(lastFrame()).toContain('PR Title: bad line more rtl');
 	expect(lastFrame()).not.toContain('\u001b');
 	expect(lastFrame()).not.toContain('\u202e');
 	expect(lastFrame()).not.toContain('\u2066');
@@ -968,7 +984,7 @@ it('refreshes full worktree metadata only when requested', async () => {
 				kind: 'found',
 				number: 42,
 				title: 'Manual refresh PR metadata',
-				url: 'https://github.com/ohzw/worktree-command-tui/pull/42',
+				url: 'https://github.com/acme/worktree-command-tui/pull/42',
 				state: 'OPEN',
 				isDraft: false,
 				baseBranch: 'main',
@@ -1282,7 +1298,7 @@ it('deletes the selected worktree after confirming with y', async () => {
 	await waitForInput();
 	await waitForInput();
 	expect(deleteWorktree).toHaveBeenCalledWith('/repo/.worktree/feat-a');
-	expect(lastFrame()).toContain('deleted feat/a');
+	await vi.waitFor(() => expect(lastFrame()).toContain('deleted feat/a'));
 });
 
 it('ignores setup key when setupCommand is not configured', async () => {

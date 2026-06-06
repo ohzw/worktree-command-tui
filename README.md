@@ -85,6 +85,18 @@ Additional shortcuts from the help window:
 - `d` / `y` — confirm delete after arming it
 - `Esc` / `n` / `q` — cancel delete confirmation
 
+## Security and network behavior
+
+`wctui` executes the argv commands stored in `.worktree-command-tui.jsonc` when you press the matching keys. Treat repository config as trusted code:
+
+- `Enter` starts `command` in the selected worktree.
+- `i` runs `setupCommand`; package-manager install commands may run dependency lifecycle scripts.
+- `e` runs `editorCommand` with the selected worktree path appended.
+
+Review config before using those actions in an untrusted repository or worktree.
+
+The TUI also reads pull request metadata with the GitHub CLI when `remote.origin.url` points at `github.com`. This uses `gh api`, your existing `gh` authentication, and a short timeout. Non-GitHub remote hosts are ignored by default.
+
 ## Configuration
 
 The tool looks for config in this order:

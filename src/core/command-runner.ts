@@ -2,6 +2,7 @@ import {closeSync, mkdirSync, openSync} from 'node:fs';
 import {spawn} from 'node:child_process';
 import path from 'node:path';
 
+
 function getLogEnvironment(): NodeJS.ProcessEnv {
 	return {
 		...process.env,
@@ -33,10 +34,11 @@ export function runCommandToLog({
 
 	const finalize = () => {
 		if (settled) {
-			return;
+			return false;
 		}
 		settled = true;
 		closeSync(fd);
+		return true;
 	};
 
 	const child = spawn(command[0]!, command.slice(1), {
@@ -46,11 +48,14 @@ export function runCommandToLog({
 	});
 
 	child.once('error', error => {
-		finalize();
-		reject(error);
+		if (finalize()) {
+			reject(error);
+		}
 	});
 	child.once('exit', (code, signal) => {
-		finalize();
+		if (!finalize()) {
+			return;
+		}
 		if (code === 0) {
 			resolve({logPath});
 			return;
@@ -91,26 +96,30 @@ export function startDetachedCommand({
 
 	const finalize = () => {
 		if (settled) {
-			return;
+			return false;
 		}
 		settled = true;
 		closeSync(fd);
+		return true;
 	};
 
 	child.once('error', error => {
-		finalize();
-		reject(error);
+		if (finalize()) {
+			reject(error);
+		}
 	});
 	child.once('spawn', () => {
 		const pid = child.pid;
 		if (pid === undefined) {
-			finalize();
-			reject(new Error('spawn succeeded without pid'));
+			if (finalize()) {
+				reject(new Error('spawn succeeded without pid'));
+			}
 			return;
 		}
 		child.unref();
-		finalize();
-		resolve({pid, pgid: pid, logPath});
+		if (finalize()) {
+			resolve({pid, pgid: pid, logPath});
+		}
 	});
 
 	return promise;

@@ -5,7 +5,7 @@ const execFileAsync = promisify(execFile);
 const GH_TIMEOUT_MS = 2500;
 const SCP_REMOTE_URL_RE = /^(?:[^@]+@)?([^:]+):(.+)$/;
 
-interface GitHubRepository {
+export interface GitHubRepository {
 	host: string;
 	owner: string;
 	name: string;
@@ -85,10 +85,34 @@ function parseGitHubRepositoryFromRemoteUrl(remoteUrl: string): GitHubRepository
 	return {host: scpMatch[1]!.toLowerCase(), owner: segments[0]!, name: segments[1]!};
 }
 
+export function isGitHubMetadataHostAllowed(host: string): boolean {
+	return host.toLowerCase() === 'github.com';
+}
+
+export function normalizePullRequestUrlForRepository(url: string, repository: GitHubRepository, number: number): string | null {
+	if (!URL.canParse(url)) {
+		return null;
+	}
+
+	const parsedUrl = new URL(url);
+	const expectedPath = `/${repository.owner}/${repository.name}/pull/${number}`;
+	if (
+		parsedUrl.protocol !== 'https:'
+		|| parsedUrl.hostname.toLowerCase() !== repository.host
+		|| parsedUrl.pathname !== expectedPath
+		|| parsedUrl.search !== ''
+		|| parsedUrl.hash !== ''
+	) {
+		return null;
+	}
+
+	return `https://${repository.host}${expectedPath}`;
+}
+
 async function readGitHubRepository(cwd: string): Promise<GitHubRepository> {
 	const {stdout} = await execFileAsync('git', ['config', '--get', 'remote.origin.url'], {cwd});
 	const repository = parseGitHubRepositoryFromRemoteUrl(stdout);
-	if (!repository) {
+	if (!repository || !isGitHubMetadataHostAllowed(repository.host)) {
 		throw new Error('GitHub repository remote unavailable');
 	}
 	return repository;
@@ -112,9 +136,7 @@ function buildPullRequestListArgs(
 		'per_page=1',
 	];
 
-	if (repository.host !== 'github.com' && repository.host !== 'www.github.com') {
-		args.push('--hostname', repository.host);
-	}
+	args.push('--hostname', repository.host);
 
 	return args;
 }
@@ -130,7 +152,7 @@ function normalizePullRequestState(
 	return typeof mergedAt === 'string' && mergedAt.length > 0 ? 'MERGED' : 'CLOSED';
 }
 
-function parsePullRequest(item: unknown): ParsedPullRequest | null {
+function parsePullRequest(item: unknown, repository: GitHubRepository): ParsedPullRequest | null {
 	if (typeof item !== 'object' || item === null) {
 		return null;
 	}
@@ -138,11 +160,11 @@ function parsePullRequest(item: unknown): ParsedPullRequest | null {
 	const pullRequest = item as GitHubPullRequestResponseItem;
 	const number = typeof pullRequest.number === 'number' ? pullRequest.number : NaN;
 	const title = typeof pullRequest.title === 'string' ? pullRequest.title : '';
-	const url = typeof pullRequest.html_url === 'string' ? pullRequest.html_url : '';
+	const url = typeof pullRequest.html_url === 'string' && Number.isFinite(number) ? normalizePullRequestUrlForRepository(pullRequest.html_url, repository, number) : null;
 	const isDraft = typeof pullRequest.draft === 'boolean' ? pullRequest.draft : false;
 	const baseRefName = typeof pullRequest.base?.ref === 'string' ? pullRequest.base.ref : '';
 
-	if (!Number.isFinite(number) || !title || !url || !baseRefName) {
+	if (!Number.isFinite(number) || !title || url === null || !baseRefName) {
 		return null;
 	}
 
@@ -167,7 +189,7 @@ async function readPullRequestList(cwd: string, branch: string, state: 'all' | '
 
 	const pullRequests: ParsedPullRequest[] = [];
 	for (const item of payload) {
-		const parsed = parsePullRequest(item);
+		const parsed = parsePullRequest(item, repository);
 		if (parsed !== null) {
 			pullRequests.push(parsed);
 		}

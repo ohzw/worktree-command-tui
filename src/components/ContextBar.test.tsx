@@ -69,6 +69,16 @@ describe('ContextBar', () => {
 		expect(text).not.toContain('Enter');
 	});
 
+	it('sanitizes status text before rendering it to the terminal', () => {
+		const tree = ContextBar({status: {kind: 'idle', message: 'ready\u001b]0;owned\u0007\nnext\u202E'}, setupAvailable: false, editorAvailable: false, confirmationOpen: false});
+		const text = textContent(tree);
+
+		expect(text).toContain('ready next');
+		expect(text).not.toContain('\u001b');
+		expect(text).not.toContain('owned');
+		expect(text).not.toContain('\u202E');
+	});
+
 	it('hides the editor shortcut when no editor command is configured', () => {
 		const tree = ContextBar({status: {kind: 'idle', message: 'ready'}, setupAvailable: true, editorAvailable: false, confirmationOpen: false});
 		const whiteText = collectElements(tree)

@@ -1,4 +1,4 @@
-import {readFile, writeFile} from 'node:fs/promises';
+import {readFile, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {CONFIG_FILE_NAME, CONFIG_FILE_NAMES, parseJsonc, type ToolConfig} from './config.js';
 
@@ -8,6 +8,8 @@ const LEADING_NAMESPACE_HYPHENS_PATTERN = /^-+/u;
 const TRAILING_NAMESPACE_HYPHENS_PATTERN = /-+$/u;
 const SAFE_NAMESPACE_DESCRIPTION = '[A-Za-z0-9._-]+';
 const DEFAULT_NAMESPACE = 'worktree-command-tui';
+const MAX_CONFIG_BYTES = 64 * 1024;
+
 
 export interface DefaultToolConfigOptions {
 	namespaceSeed: string;
@@ -50,6 +52,17 @@ function readStringList(value: unknown, fieldName: string): string[] {
 	return value;
 }
 
+function readOrphanMatchers(value: unknown): string[] {
+	const matchers = readStringList(value, 'orphanMatchers');
+	for (const matcher of matchers) {
+		if (!/\S+\s+\S+/u.test(matcher)) {
+			throw new Error('orphanMatchers entries must include a command plus argument fragment');
+		}
+	}
+	return matchers;
+}
+
+
 function readRequiredCommand(value: unknown, fieldName: string): string[] {
 	if (!Array.isArray(value) || value.length === 0 || value.some(part => !isNonEmptyString(part))) {
 		throw new Error(`${fieldName} must be a non-empty string array`);
@@ -88,7 +101,7 @@ export function validateToolConfig(raw: unknown): ToolConfig {
 		editorCommand: readOptionalCommand(config.editorCommand, 'editorCommand'),
 		port: readPort(config.port),
 		requiredFiles: readStringList(config.requiredFiles, 'requiredFiles'),
-		orphanMatchers: readStringList(config.orphanMatchers, 'orphanMatchers'),
+		orphanMatchers: readOrphanMatchers(config.orphanMatchers),
 	};
 }
 
@@ -104,11 +117,18 @@ export function createDefaultToolConfig(options: DefaultToolConfigOptions): Tool
 	});
 }
 
+async function readConfigFile(configPath: string): Promise<string> {
+	if ((await stat(configPath)).size > MAX_CONFIG_BYTES) {
+		throw new Error('config file is too large');
+	}
+	return readFile(configPath, 'utf8');
+}
+
 async function readFirstConfig(repoRoot: string): Promise<string> {
 	let firstError: unknown;
 	for (const fileName of CONFIG_FILE_NAMES) {
 		try {
-			return await readFile(path.join(repoRoot, fileName), 'utf8');
+			return await readConfigFile(path.join(repoRoot, fileName));
 		} catch (error) {
 			firstError ??= error;
 		}
@@ -123,7 +143,7 @@ export async function loadToolConfig({repoRoot}: {repoRoot: string}): Promise<To
 export function renderConfigJsonc(config: ToolConfig): string {
 	const setupCommandSection = config.setupCommand === undefined ? '' : `
   // Optional command run manually with the setup key in the selected worktree.
-  // Useful for first-time dependency installation without doing it on every switch.
+  // Review before running in untrusted worktrees; package installs may run lifecycle scripts.
   "setupCommand": ${JSON.stringify(config.setupCommand)},
 `;
 	const editorCommandSection = config.editorCommand === undefined ? '' : `
@@ -136,8 +156,8 @@ export function renderConfigJsonc(config: ToolConfig): string {
   // Keep this filesystem-safe: letters, numbers, dots, underscores, and hyphens only.
   "namespace": ${JSON.stringify(config.namespace)},
 
-  // Command launched in the selected worktree.
-  // Use argv form so spaces and shell metacharacters are passed safely.
+  // Command launched in the selected worktree when you press Enter.
+  // Treat this config as trusted code. argv form avoids shell metacharacter expansion.
   "command": ${JSON.stringify(config.command)},
 ${setupCommandSection}${editorCommandSection}
   // TCP port owned by the command, used when stopping stale/orphaned processes.
@@ -146,7 +166,8 @@ ${setupCommandSection}${editorCommandSection}
   // Files that must exist in a worktree before the command can be started there.
   "requiredFiles": ${JSON.stringify(config.requiredFiles)},
 
-  // Extra process command-line substrings treated as orphans for cleanup.
+  // Extra command-line substrings for cleanup within the recorded process group only.
+  // Include a command plus argument fragment; broad single-token matchers are rejected.
   // Example: ["node --watch", "vite --host 0.0.0.0"]
   "orphanMatchers": ${JSON.stringify(config.orphanMatchers)},
 }

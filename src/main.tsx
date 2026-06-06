@@ -2,6 +2,7 @@
 import React from 'react';
 import {createConfigForRepo, parseInitArgs} from './core/init.js';
 import {CONFIG_FILE_NAME, CONFIG_FILE_NAMES} from './core/config.js';
+import {sanitizeInlineText} from './core/worktree-projection.js';
 import {ThemeProvider} from '@inkjs/ui';
 import {render} from 'ink';
 import {APP_RENDER_OPTIONS} from './render-options.js';
@@ -41,7 +42,7 @@ async function handleInitCommand(): Promise<void> {
 	try {
 		parsed = parseInitArgs(args.slice(1));
 	} catch (error) {
-		console.error((error as Error).message);
+		console.error(sanitizeInlineText((error as Error).message));
 		process.exit(1);
 	}
 
@@ -52,9 +53,9 @@ async function handleInitCommand(): Promise<void> {
 
 	try {
 		const result = await createConfigForRepo({cwd, force: parsed.force});
-		console.log(`Created ${result.path}`);
+		console.log(`Created ${sanitizeInlineText(result.path)}`);
 	} catch (error) {
-		console.error((error as Error).message);
+		console.error(sanitizeInlineText((error as Error).message));
 		process.exit(1);
 	}
 }
@@ -70,7 +71,7 @@ if (args.includes('-h') || args.includes('--help')) {
 }
 
 if (subcommand !== undefined) {
-	console.error(`Unknown command: ${subcommand}`);
+	console.error(`Unknown command: ${sanitizeInlineText(subcommand)}`);
 	process.exit(1);
 }
 
@@ -103,6 +104,6 @@ try {
 		});
 	}
 } catch (error) {
-	console.error(describeError(error));
+	console.error(sanitizeInlineText(describeError(error)));
 	process.exit(1);
 }

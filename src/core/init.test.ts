@@ -22,7 +22,7 @@ describe('runInit', () => {
 		const written = parseJsonc(source) as Record<string, unknown>;
 
 		expect(result.path).toBe(path.join(root, CONFIG_FILE_NAME));
-		expect(source).toContain('// Command launched in the selected worktree.');
+		expect(source).toContain('// Command launched in the selected worktree when you press Enter.');
 		expect(written).toMatchObject({
 			namespace: 'example-app',
 			command: ['bun', 'run', 'dev'],

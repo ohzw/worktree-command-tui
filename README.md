@@ -50,6 +50,18 @@ wctui
 
 If no configuration file is found, the CLI will prompt you to run `wctui init`.
 
+## Security and network behavior
+
+`wctui` executes the argv commands stored in `.worktree-command-tui.jsonc` when you press the matching keys. Treat repository config as trusted code:
+
+- `Enter` starts `command` in the selected worktree.
+- `i` runs `setupCommand`; package-manager install commands may run dependency lifecycle scripts.
+- `e` runs `editorCommand` with the selected worktree path appended.
+
+Review config before using those actions in an untrusted repository or worktree.
+
+The TUI also reads pull request metadata with the GitHub CLI when `remote.origin.url` points at `github.com`. This uses `gh api`, your existing `gh` authentication, and a short timeout. Non-GitHub remote hosts are ignored by default.
+
 ## Configuration
 
 The tool reads these files in this order:

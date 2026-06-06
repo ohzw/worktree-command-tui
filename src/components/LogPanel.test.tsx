@@ -20,6 +20,18 @@ describe('LogPanel', () => {
 		expect(lastFrame()).not.toContain('[0m');
 	});
 
+	it('sanitizes log filenames before rendering them as headers', () => {
+		const logs: AppLogEntry[] = [{
+			name: 'watch\u001b]0;owned\u0007\nnext.log',
+			path: '/tmp/watch.log',
+			content: 'ok',
+		}];
+
+		expect(buildLogLines(logs)[0]).toEqual({
+			segments: [{text: '[watch next.log]', color: 'cyan'}],
+		});
+	});
+
 	it('preserves ANSI SGR foreground colors in log line segments', () => {
 		const logs: AppLogEntry[] = [{
 			name: 'watch.log',

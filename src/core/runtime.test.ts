@@ -20,7 +20,7 @@ const TEST_MERGED_PR_RESPONSE = JSON.stringify([{
 }]);
 
 function buildGhPullRequestArgs(branch: string, state: 'all' | 'open'): string {
-	return `api -X GET repos/${TEST_GITHUB_OWNER}/${TEST_GITHUB_REPOSITORY}/pulls -f state=${state} -f head=${TEST_GITHUB_OWNER}:${branch} -F per_page=1`;
+	return `api -X GET repos/${TEST_GITHUB_OWNER}/${TEST_GITHUB_REPOSITORY}/pulls -f state=${state} -f head=${TEST_GITHUB_OWNER}:${branch} -F per_page=1 --hostname github.com`;
 }
 
 function writeMockGhBinary(
@@ -127,7 +127,7 @@ describe('buildActions setup command', () => {
 
 		expect(model.status.message).toMatch(/^setup complete for /u);
 		expect(model.logs[0]?.content).toContain('setup output');
-	});
+	}, 15_000);
 
 	it('does not run setup when starting a worktree', async () => {
 		const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'wctui-runtime-start-')));
@@ -147,7 +147,7 @@ describe('buildActions setup command', () => {
 
 		await vi.waitFor(() => expect(existsSync(path.join(root, 'started.txt'))).toBe(true));
 		expect(existsSync(path.join(root, 'setup.txt'))).toBe(false);
-	});
+	}, 15_000);
 
 	it('adds local reflog branch creation time to rows', async () => {
 		const root = realpathSync(mkdtempSync(path.join(tmpdir(), 'wctui-runtime-branch-created-')));

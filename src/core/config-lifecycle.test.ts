@@ -5,24 +5,48 @@ import {createDefaultToolConfig, renderConfigJsonc, toSafeNamespace, validateToo
 const validConfig = {
 	namespace: 'example-app',
 	command: ['npm', 'run', 'dev'],
-	setupCommand: ['npm', 'install'],
+	setupCommand: [['npm', 'install']],
 	editorCommand: ['code', '--reuse-window'],
 	port: 3000,
+	ports: [3000],
 	requiredFiles: ['package.json'],
 	orphanMatchers: [],
 };
 
 describe('validateToolConfig', () => {
 	it('normalizes missing optional lists to the same defaults used by init', () => {
-		expect(validateToolConfig({namespace: 'example-app', command: ['npm', 'run', 'dev'], port: 3000})).toEqual({
-			namespace: 'example-app',
-			command: ['npm', 'run', 'dev'],
-			setupCommand: undefined,
-			editorCommand: undefined,
-			port: 3000,
-			requiredFiles: [],
-			orphanMatchers: [],
-		});
+		expect(
+			validateToolConfig({namespace: 'example-app', command: ['npm', 'run', 'dev'], port: 3000, ports: [4000, 4001], orphanMatchers: []}),
+	).toEqual({
+		namespace: 'example-app',
+		command: ['npm', 'run', 'dev'],
+		setupCommand: undefined,
+		editorCommand: undefined,
+		port: 4000,
+		ports: [4000, 4001],
+		requiredFiles: [],
+		orphanMatchers: [],
+	});
+	});
+
+	it('accepts ports arrays from new config', () => {
+		expect(
+			validateToolConfig({
+				namespace: 'example-app',
+				command: ['npm', 'run', 'dev'],
+				ports: [3001, 3002],
+				orphanMatchers: [],
+			}),
+	).toEqual({
+		namespace: 'example-app',
+		command: ['npm', 'run', 'dev'],
+		setupCommand: undefined,
+		editorCommand: undefined,
+		port: 3001,
+		ports: [3001, 3002],
+		requiredFiles: [],
+		orphanMatchers: [],
+	});
 	});
 
 	it('accepts generated default configs without changing public fields', () => {
@@ -35,9 +59,10 @@ describe('validateToolConfig', () => {
 		expect(validateToolConfig(config)).toEqual({
 			namespace: 'example-app',
 			command: ['npm', 'run', 'start'],
-			setupCommand: ['npm', 'install'],
+			setupCommand: [['npm', 'install']],
 			editorCommand: ['code'],
 			port: 3000,
+			ports: [3000],
 			requiredFiles: ['package.json'],
 			orphanMatchers: [],
 		});
@@ -57,14 +82,12 @@ describe('validateToolConfig', () => {
 		expect(() => validateToolConfig({...validConfig, command: 'npm run dev'})).toThrow(
 			'command must be a non-empty string array',
 		);
-		expect(() => validateToolConfig({...validConfig, command: []})).toThrow(
-			'command must be a non-empty string array',
-		);
+		expect(() => validateToolConfig({...validConfig, command: []})).toThrow('command must be a non-empty string array');
 	});
 
 	it('rejects malformed optional command and list fields with public load errors', () => {
 		expect(() => validateToolConfig({...validConfig, setupCommand: []})).toThrow(
-			'setupCommand must be a non-empty string array when set',
+			'setupCommand must be a non-empty string array or an array of non-empty string arrays when set',
 		);
 		expect(() => validateToolConfig({...validConfig, editorCommand: 'code .'})).toThrow(
 			'editorCommand must be a non-empty string array when set',
@@ -84,13 +107,17 @@ describe('validateToolConfig', () => {
 		expect(() => validateToolConfig({...validConfig, orphanMatchers: ['vite --host']})).not.toThrow();
 	});
 
-	it('rejects ports outside the tcp range', () => {
+	it('rejects invalid ports and requires at least one configured port', () => {
 		expect(() => validateToolConfig({...validConfig, port: 0})).toThrow(
 			'port must be an integer between 1 and 65535',
 		);
 		expect(() => validateToolConfig({...validConfig, port: 65_536})).toThrow(
 			'port must be an integer between 1 and 65535',
 		);
+		expect(() => validateToolConfig({...validConfig, ports: []})).toThrow(
+			'ports must be a non-empty array of integers between 1 and 65535',
+		);
+		expect(() => validateToolConfig({...validConfig, port: undefined, ports: []})).toThrow('ports must be a non-empty array of integers between 1 and 65535');
 	});
 });
 

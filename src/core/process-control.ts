@@ -6,7 +6,7 @@ export interface CleanupDeps {
 }
 
 export async function stopSessionWithFallback(
-	input: {pgid: number; port: number; orphanMatchers: string[]},
+	input: {pgid: number; ports: number[]; orphanMatchers: string[]},
 	deps: CleanupDeps,
 ): Promise<boolean> {
 	if (input.pgid <= 1) {
@@ -17,7 +17,9 @@ export async function stopSessionWithFallback(
 		return true;
 	}
 
-	await deps.killPortOwner(input.port, input.pgid);
+	for (const port of input.ports) {
+		await deps.killPortOwner(port, input.pgid);
+	}
 	for (const matcher of input.orphanMatchers) {
 		await deps.killOrphans(matcher, input.pgid);
 	}

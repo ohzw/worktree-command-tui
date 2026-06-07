@@ -13,9 +13,10 @@ const paths = {
 const config: ToolConfig = {
 	namespace: 'test',
 	command: ['npm', 'start'],
-	setupCommand: ['npm', 'install'],
+	setupCommand: [['npm', 'install']],
 	editorCommand: ['code', '--reuse-window'],
 	port: 3000,
+	ports: [3000, 4000],
 	requiredFiles: ['package.json'],
 	orphanMatchers: ['vite --host'],
 };
@@ -238,7 +239,7 @@ describe('createRuntimeStateActions', () => {
 
 		const model = await actions.setup('/repo');
 
-		expect(adapter.runSetup).toHaveBeenCalledWith({command: config.setupCommand, cwd: '/repo', logsDir: paths.logsDir, logFileBase: 'main.setup'});
+		expect(adapter.runSetup).toHaveBeenCalledWith({command: config.setupCommand?.[0], cwd: '/repo', logsDir: paths.logsDir, logFileBase: 'main.setup', workspaceRoot: undefined});
 		expect(model.status).toEqual({kind: 'idle', message: 'setup complete for main'});
 		expect(model.logs).toBe(logs);
 	});
@@ -283,6 +284,7 @@ describe('createRuntimeStateActions', () => {
 			pid: 222,
 			pgid: 222,
 			port: 3000,
+			ports: [3000, 4000],
 			logPath: '/repo/.git/worktree-command-tui/logs/main.log',
 			startedAt: '2026-06-05T12:00:00.000Z',
 		});

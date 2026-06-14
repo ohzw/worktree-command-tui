@@ -15,7 +15,13 @@ export interface RuntimeStateAdapter {
 	readLogs: (logPath: string | null) => Promise<AppLogEntry[]>;
 	readWorktreeBranch: (worktreePath: string) => Promise<string>;
 	getInvalidReason: (worktreePath: string) => Promise<string | null>;
-	runSetup: (input: {command: string[]; cwd: string; logsDir: string; logFileBase: string}) => Promise<{logPath: string}>;
+	runSetup: (input: {
+		command: string[];
+		cwd: string;
+		logsDir: string;
+		logFileBase: string;
+		workspaceRoot: string | undefined;
+	}) => Promise<{logPath: string}>;
 	startCommand: (input: {command: string[]; cwd: string; logsDir: string; logFileBase: string}) => Promise<StartedCommand>;
 	stopSession: (active: SessionRecord) => Promise<void>;
 	clearSession: () => Promise<void>;
@@ -29,14 +35,14 @@ export interface RuntimeStateAdapter {
 export interface RuntimeStateOptions {
 	config: ToolConfig;
 	paths: SessionPaths;
+	workspaceRoot?: string;
 	adapter: RuntimeStateAdapter;
 }
-
 function toLogFileBase(branch: string): string {
 	return branch.replace(/[\\/]/g, '-');
 }
 
-export function createRuntimeStateActions({config, paths, adapter}: RuntimeStateOptions): AppActions {
+export function createRuntimeStateActions({config, paths, workspaceRoot, adapter}: RuntimeStateOptions): AppActions {
 	const refreshLogs = async (): Promise<AppLogRefresh> => {
 		const active = await adapter.readActive();
 		return {
@@ -45,7 +51,6 @@ export function createRuntimeStateActions({config, paths, adapter}: RuntimeState
 			activeBranch: active?.branch ?? null,
 		};
 	};
-
 	const refreshWithStatus = async (
 		run: () => Promise<AppStatus>,
 		preserveRunningStatus: boolean,
@@ -81,8 +86,8 @@ export function createRuntimeStateActions({config, paths, adapter}: RuntimeState
 	};
 
 	const setup = async (worktreePath: string): Promise<AppModel> => {
-		const setupCommand = config.setupCommand;
-		if (setupCommand === undefined) {
+		const setupCommands = config.setupCommand;
+		if (setupCommands === undefined) {
 			const model = await adapter.refresh();
 			return {
 				...model,
@@ -93,20 +98,34 @@ export function createRuntimeStateActions({config, paths, adapter}: RuntimeState
 		const branch = await adapter.readWorktreeBranch(worktreePath);
 		const logFileBase = `${toLogFileBase(branch)}.setup`;
 		const setupLogPath = path.join(paths.logsDir, `${logFileBase}.log`);
-		try {
-			await adapter.runSetup({
-				command: setupCommand,
-				cwd: worktreePath,
-				logsDir: paths.logsDir,
-				logFileBase,
-			});
-		} catch (error) {
-			const model = await adapter.refresh();
-			return {
-				...model,
-				status: {kind: 'error', message: error instanceof Error ? error.message : String(error)},
-				logs: await adapter.readLogs(setupLogPath),
-			};
+		for (let index = 0; index < setupCommands.length; index += 1) {
+			const setupCommand = setupCommands[index];
+			if (setupCommand === undefined) {
+				const model = await adapter.refresh();
+				return {
+					...model,
+					status: {kind: 'error', message: `setup command ${index + 1} is not configured`},
+					logs: await adapter.readLogs(setupLogPath),
+				};
+			}
+
+			try {
+				await adapter.runSetup({
+					command: setupCommand,
+					cwd: worktreePath,
+					logsDir: paths.logsDir,
+					logFileBase,
+					workspaceRoot,
+				});
+			} catch (error) {
+				const model = await adapter.refresh();
+				const commandLabel = setupCommands.length > 1 ? `setup command ${index + 1}/${setupCommands.length} ` : '';
+				return {
+					...model,
+					status: {kind: 'error', message: `${commandLabel}${error instanceof Error ? error.message : String(error)}`.trim()},
+					logs: await adapter.readLogs(setupLogPath),
+				};
+			}
 		}
 
 		const model = await adapter.refresh();
@@ -153,6 +172,7 @@ export function createRuntimeStateActions({config, paths, adapter}: RuntimeState
 			pid: started.pid,
 			pgid: started.pgid,
 			port: config.port,
+			ports: config.ports,
 			logPath: started.logPath,
 			startedAt: adapter.nowIso(),
 		});

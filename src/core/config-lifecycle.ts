@@ -62,6 +62,34 @@ function readOrphanMatchers(value: unknown): string[] {
 	return matchers;
 }
 
+function isNonEmptyStringArray(value: unknown): value is string[] {
+	return Array.isArray(value) && value.length > 0 && value.every(part => isNonEmptyString(part));
+}
+
+function readOptionalSetupCommands(value: unknown): string[][] | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+
+	if (!Array.isArray(value) || value.length === 0) {
+		throw new Error('setupCommand must be a non-empty string array or an array of non-empty string arrays when set');
+	}
+
+	const looksLikeSingleCommand = value.every(part => isNonEmptyString(part));
+	if (looksLikeSingleCommand) {
+		return [value];
+	}
+
+	if (!value.every(part => Array.isArray(part))) {
+		throw new Error('setupCommand must be a non-empty string array or an array of non-empty string arrays when set');
+	}
+
+	if (!value.every(part => isNonEmptyStringArray(part))) {
+		throw new Error('setupCommand must be a non-empty string array or an array of non-empty string arrays when set');
+	}
+
+	return value as string[][];
+}
 
 function readRequiredCommand(value: unknown, fieldName: string): string[] {
 	if (!Array.isArray(value) || value.length === 0 || value.some(part => !isNonEmptyString(part))) {
@@ -80,11 +108,40 @@ function readOptionalCommand(value: unknown, fieldName: string): string[] | unde
 	return value;
 }
 
-function readPort(value: unknown): number {
+function readPort(value: unknown, fieldName: string): number {
 	if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 65535) {
-		throw new Error('port must be an integer between 1 and 65535');
+		throw new Error(`${fieldName} must be an integer between 1 and 65535`);
 	}
 	return value;
+}
+
+function readPorts(value: unknown): number[] {
+	if (value === undefined) {
+		return [];
+	}
+	if (!Array.isArray(value) || value.length === 0 || value.some(port => typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535)) {
+		throw new Error('ports must be a non-empty array of integers between 1 and 65535');
+	}
+	return value;
+}
+
+function uniquePorts(ports: number[]): number[] {
+	return [...new Set(ports)];
+}
+
+function mergeConfiguredPorts(legacyPort: number | undefined, configuredPorts: number[]): number[] {
+	const merged = configuredPorts.length > 0 ? configuredPorts : legacyPort === undefined ? [] : [legacyPort];
+	const resolved = uniquePorts(merged);
+	if (resolved.length === 0) {
+		throw new Error('port or ports must be configured');
+	}
+	return resolved;
+}
+
+function readPortList(port: unknown, ports: unknown): number[] {
+	const legacyPort = port === undefined ? undefined : readPort(port, 'port');
+	const configuredPorts = readPorts(ports);
+	return mergeConfiguredPorts(legacyPort, configuredPorts);
 }
 
 export function validateToolConfig(raw: unknown): ToolConfig {
@@ -94,12 +151,14 @@ export function validateToolConfig(raw: unknown): ToolConfig {
 		throw new Error(`namespace must match ${SAFE_NAMESPACE_DESCRIPTION}`);
 	}
 
+	const ports = readPortList(config.port, (config as {ports?: unknown}).ports);
 	return {
 		namespace: config.namespace,
 		command,
-		setupCommand: readOptionalCommand(config.setupCommand, 'setupCommand'),
+		setupCommand: readOptionalSetupCommands(config.setupCommand),
 		editorCommand: readOptionalCommand(config.editorCommand, 'editorCommand'),
-		port: readPort(config.port),
+		port: ports[0] ?? 0,
+		ports,
 		requiredFiles: readStringList(config.requiredFiles, 'requiredFiles'),
 		orphanMatchers: readOrphanMatchers(config.orphanMatchers),
 	};
@@ -109,13 +168,52 @@ export function createDefaultToolConfig(options: DefaultToolConfigOptions): Tool
 	return validateToolConfig({
 		namespace: toSafeNamespace(options.namespaceSeed),
 		command: [options.packageManager, 'run', options.script],
-		setupCommand: [options.packageManager, 'install'],
+		setupCommand: [[options.packageManager, 'install']],
 		editorCommand: ['code'],
-		port: 3000,
+		ports: [3000],
 		requiredFiles: ['package.json'],
 		orphanMatchers: [],
 	});
 }
+
+export function renderConfigJsonc(config: ToolConfig): string {
+	const setupCommandSection = config.setupCommand === undefined ? '' : `
+  // Optional command(s) run manually with the setup key in the selected worktree.
+  // Review before running in untrusted worktrees; package installs may run lifecycle scripts.
+  // When this is an array of arrays, each entry is executed in order.
+  // Built-in helper: ["copy-root-file", ".env", ".env"]
+  // copies .env from the repository root to the selected worktree.
+  "setupCommand": ${JSON.stringify(config.setupCommand)},
+`;
+	const editorCommandSection = config.editorCommand === undefined ? '' : `
+  // Optional command that opens the selected worktree path in an editor.
+  // The selected worktree path is appended as the final argv entry.
+  "editorCommand": ${JSON.stringify(config.editorCommand)},
+`;
+	return `{
+  // Session namespace used for git-common-dir state files and logs.
+  // Keep this filesystem-safe: letters, numbers, dots, underscores, and hyphens only.
+  "namespace": ${JSON.stringify(config.namespace)},
+
+  // Command launched in the selected worktree when you press Enter.
+  // Treat this config as trusted code. argv form avoids shell metacharacter expansion.
+  "command": ${JSON.stringify(config.command)},
+${setupCommandSection}${editorCommandSection}
+  // TCP ports owned by the command, used when stopping stale/orphaned processes.
+  // Include all ports your command may bind.
+  "ports": ${JSON.stringify(config.ports)},
+
+  // Files that must exist in a worktree before the command can be started there.
+  "requiredFiles": ${JSON.stringify(config.requiredFiles)},
+
+  // Extra command-line substrings for cleanup within the recorded process group only.
+  // Include a command plus argument fragment; broad single-token matchers are rejected.
+  // Example: ["node --watch", "vite --host 0.0.0.0"]
+  "orphanMatchers": ${JSON.stringify(config.orphanMatchers)},
+}
+`;
+}
+
 
 async function readConfigFile(configPath: string): Promise<string> {
 	if ((await stat(configPath)).size > MAX_CONFIG_BYTES) {
@@ -140,39 +238,6 @@ export async function loadToolConfig({repoRoot}: {repoRoot: string}): Promise<To
 	return validateToolConfig(parseJsonc(await readFirstConfig(repoRoot)));
 }
 
-export function renderConfigJsonc(config: ToolConfig): string {
-	const setupCommandSection = config.setupCommand === undefined ? '' : `
-  // Optional command run manually with the setup key in the selected worktree.
-  // Review before running in untrusted worktrees; package installs may run lifecycle scripts.
-  "setupCommand": ${JSON.stringify(config.setupCommand)},
-`;
-	const editorCommandSection = config.editorCommand === undefined ? '' : `
-  // Optional command that opens the selected worktree path in an editor.
-  // The selected worktree path is appended as the final argv entry.
-  "editorCommand": ${JSON.stringify(config.editorCommand)},
-`;
-	return `{
-  // Session namespace used for git-common-dir state files and logs.
-  // Keep this filesystem-safe: letters, numbers, dots, underscores, and hyphens only.
-  "namespace": ${JSON.stringify(config.namespace)},
-
-  // Command launched in the selected worktree when you press Enter.
-  // Treat this config as trusted code. argv form avoids shell metacharacter expansion.
-  "command": ${JSON.stringify(config.command)},
-${setupCommandSection}${editorCommandSection}
-  // TCP port owned by the command, used when stopping stale/orphaned processes.
-  "port": ${JSON.stringify(config.port)},
-
-  // Files that must exist in a worktree before the command can be started there.
-  "requiredFiles": ${JSON.stringify(config.requiredFiles)},
-
-  // Extra command-line substrings for cleanup within the recorded process group only.
-  // Include a command plus argument fragment; broad single-token matchers are rejected.
-  // Example: ["node --watch", "vite --host 0.0.0.0"]
-  "orphanMatchers": ${JSON.stringify(config.orphanMatchers)},
-}
-`;
-}
 
 export async function findExistingConfigPath(workspaceRoot: string, fileExists: (filePath: string) => Promise<boolean>): Promise<string | null> {
 	for (const fileName of CONFIG_FILE_NAMES) {

@@ -1,4 +1,4 @@
-import {mkdtempSync, readFileSync} from 'node:fs';
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {describe, expect, it} from 'vitest';
@@ -156,6 +156,78 @@ describe('runCommandToLog', () => {
 		}
 	});
 
+
+	it('copies root-scoped files into the selected worktree without spawning a child process', async () => {
+		const workspaceRoot = mkdtempSync(path.join(tmpdir(), 'wctui-command-copy-root-'));
+		const worktreeRoot = mkdtempSync(path.join(tmpdir(), 'wctui-command-copy-worktree-'));
+		writeFileSync(path.join(workspaceRoot, '.env.example'), 'API_URL=http://localhost\n');
+
+		const result = await runCommandToLog({
+			command: ['copy-root-file', '.env.example', '.env'],
+			cwd: worktreeRoot,
+			logsDir: path.join(worktreeRoot, 'logs'),
+			logFileBase: 'feat-a.setup',
+			workspaceRoot,
+		});
+
+		expect(readFileSync(path.join(worktreeRoot, '.env'), 'utf8')).toBe('API_URL=http://localhost\n');
+		expect(readFileSync(result.logPath, 'utf8')).toContain('copied ');
+	});
+
+	it('rejects copy-root-file path escapes before copying', async () => {
+		const workspaceRoot = mkdtempSync(path.join(tmpdir(), 'wctui-command-copy-root-'));
+		const worktreeRoot = mkdtempSync(path.join(tmpdir(), 'wctui-command-copy-worktree-'));
+		const outsidePath = path.join(tmpdir(), `wctui-outside-${Date.now()}`);
+		writeFileSync(path.join(workspaceRoot, '.env.example'), 'API_URL=http://localhost\n');
+
+		await expect(runCommandToLog({
+			command: ['copy-root-file', '.env.example', outsidePath],
+			cwd: worktreeRoot,
+			logsDir: path.join(worktreeRoot, 'logs'),
+			logFileBase: 'feat-a.setup',
+			workspaceRoot,
+		})).rejects.toThrow('destination must stay under');
+		expect(existsSync(outsidePath)).toBe(false);
+
+		await expect(runCommandToLog({
+			command: ['copy-root-file', '../outside.env', '.env'],
+			cwd: worktreeRoot,
+			logsDir: path.join(worktreeRoot, 'logs'),
+			logFileBase: 'feat-b.setup',
+			workspaceRoot,
+		})).rejects.toThrow('source must stay under');
+	});
+
+	it('rejects copy-root-file symlink escapes before copying', async () => {
+		const workspaceRoot = mkdtempSync(path.join(tmpdir(), 'wctui-command-copy-root-'));
+		const worktreeRoot = mkdtempSync(path.join(tmpdir(), 'wctui-command-copy-worktree-'));
+		const outsideRoot = mkdtempSync(path.join(tmpdir(), 'wctui-command-copy-outside-'));
+		const outsideSource = path.join(outsideRoot, 'secret.env');
+		const outsideDestinationDir = path.join(outsideRoot, 'dest');
+		const outsideDestination = path.join(outsideDestinationDir, '.env');
+		mkdirSync(outsideDestinationDir);
+		writeFileSync(outsideSource, 'SECRET=true\n');
+		symlinkSync(outsideSource, path.join(workspaceRoot, 'linked-source'));
+		writeFileSync(path.join(workspaceRoot, '.env.example'), 'SAFE=true\n');
+		symlinkSync(outsideDestinationDir, path.join(worktreeRoot, 'linked-dest'));
+
+		await expect(runCommandToLog({
+			command: ['copy-root-file', 'linked-source', '.env'],
+			cwd: worktreeRoot,
+			logsDir: path.join(worktreeRoot, 'logs'),
+			logFileBase: 'feat-a.setup',
+			workspaceRoot,
+		})).rejects.toThrow('source must stay under');
+
+		await expect(runCommandToLog({
+			command: ['copy-root-file', '.env.example', 'linked-dest/.env'],
+			cwd: worktreeRoot,
+			logsDir: path.join(worktreeRoot, 'logs'),
+			logFileBase: 'feat-b.setup',
+			workspaceRoot,
+		})).rejects.toThrow('destination must stay under');
+		expect(existsSync(outsideDestination)).toBe(false);
+	});
 
 	it('rejects with the exit code and log path when the command fails', async () => {
 		const root = mkdtempSync(path.join(tmpdir(), 'wctui-command-fail-'));

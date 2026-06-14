@@ -121,8 +121,8 @@ Example config:
   // The selected worktree path is appended as the final argv entry.
   "editorCommand": ["code"],
 
-  // TCP port owned by the command, used when stopping stale/orphaned processes.
-  "port": 3000,
+  // TCP ports owned by the command, used when stopping stale/orphaned processes.
+  "ports": [3000],
 
   // Files that must exist in a worktree before the command can be started there.
   "requiredFiles": ["package.json"],
@@ -134,8 +134,9 @@ Example config:
 
 Notes:
 
-- `setupCommand` is optional and never runs automatically; `i` only appears when it is configured
+- `setupCommand` is optional and never runs automatically; `i` only appears when it is configured. It accepts one argv array or an array of argv arrays executed in order. The built-in `["copy-root-file", "source", "destination"]` copies from the repo root into the selected worktree.
 - `editorCommand` is optional; when set, the selected worktree path is appended to the argv and `e` becomes available
+- Use `ports` for every backend/frontend/dev-server port the command may bind; legacy single `port` configs still load
 - The generated default config auto-detects package manager hints from `packageManager` or common lockfiles and chooses a default script such as `dev`, `start`, or `serve`
 - Session records and logs are stored under the repository's Git common dir, so they are shared across worktrees in the same repo
 

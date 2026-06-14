@@ -26,9 +26,9 @@ describe('runInit', () => {
 		expect(written).toMatchObject({
 			namespace: 'example-app',
 			command: ['bun', 'run', 'dev'],
-			setupCommand: ['bun', 'install'],
+			setupCommand: [['bun', 'install']],
 			editorCommand: ['code'],
-			port: 3000,
+			ports: [3000],
 			requiredFiles: ['package.json'],
 			orphanMatchers: [],
 		});
@@ -54,6 +54,7 @@ describe('runInit', () => {
 			namespace: 'example-app',
 			command: ['npm', 'run', 'dev'],
 			port: 3000,
+			ports: [3000],
 			requiredFiles: ['package.json'],
 			orphanMatchers: [],
 		});

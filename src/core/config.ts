@@ -5,9 +5,13 @@ export const CONFIG_FILE_NAMES = [CONFIG_FILE_NAME, LEGACY_CONFIG_FILE_NAME] as 
 export interface ToolConfig {
 	namespace: string;
 	command: string[];
-	setupCommand?: string[];
+	// argv list of setup commands executed in order.
+	setupCommand?: string[][];
 	editorCommand?: string[];
+	// Canonical primary port for backwards compatibility with older session records.
 	port: number;
+	// All ports owned by the command for best-effort cleanup.
+	ports: number[];
 	requiredFiles: string[];
 	orphanMatchers: string[];
 }

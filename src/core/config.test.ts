@@ -16,7 +16,7 @@ describe('loadToolConfig', () => {
 				"command": ["npm", "run", "serve"],
 				"setupCommand": ["npm", "install"],
 				"editorCommand": ["code", "--reuse-window"],
-				"port": 34872,
+				"ports": [34872, 5173],
 				"requiredFiles": ["package.json", "default.project.json"],
 				"orphanMatchers": ["rbxtsc -w"],
 			}`,
@@ -25,9 +25,10 @@ describe('loadToolConfig', () => {
 		const config = await loadToolConfig({repoRoot: root});
 		expect(config.namespace).toBe('rojo-serve');
 		expect(config.command).toEqual(['npm', 'run', 'serve']);
-		expect(config.setupCommand).toEqual(['npm', 'install']);
+		expect(config.setupCommand).toEqual([['npm', 'install']]);
 		expect(config.editorCommand).toEqual(['code', '--reuse-window']);
 		expect(config.port).toBe(34872);
+		expect(config.ports).toEqual([34872, 5173]);
 	});
 
 	it('keeps loading legacy .worktree-command-tui.json configs', async () => {
@@ -44,6 +45,22 @@ describe('loadToolConfig', () => {
 		const config = await loadToolConfig({repoRoot: root});
 		expect(config.namespace).toBe('legacy-serve');
 		expect(config.command).toEqual(['npm', 'run', 'serve']);
+	});
+
+	it('normalizes legacy single port configs into ports arrays', async () => {
+		const root = mkdtempSync(path.join(tmpdir(), 'wctui-config-legacy-port-'));
+		writeFileSync(
+			path.join(root, CONFIG_FILE_NAME),
+			JSON.stringify({
+				namespace: 'legacy-port-serve',
+				command: ['npm', 'run', 'serve'],
+				port: 34872,
+			}),
+		);
+
+		const config = await loadToolConfig({repoRoot: root});
+		expect(config.port).toBe(34872);
+		expect(config.ports).toEqual([34872]);
 	});
 
 	it('throws a readable error when command is not a non-empty argv array', async () => {
@@ -63,7 +80,7 @@ describe('loadToolConfig', () => {
 			JSON.stringify({namespace: 'rojo-serve', command: ['npm', 'run', 'serve'], setupCommand: [], port: 34872}),
 		);
 
-		await expect(loadToolConfig({repoRoot: root})).rejects.toThrow('setupCommand must be a non-empty string array when set');
+		await expect(loadToolConfig({repoRoot: root})).rejects.toThrow('setupCommand must be a non-empty string array or an array of non-empty string arrays when set');
 	});
 
 	it('throws a readable error when editorCommand is not a non-empty argv array', async () => {

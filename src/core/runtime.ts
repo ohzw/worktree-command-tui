@@ -7,7 +7,7 @@ import {readGitStatusSummary, readBranchCreatedAtMs, resolveRepoContext, type Up
 import {readPullRequestInfo, type PullRequestInfo} from './github-metadata.js';
 import {readLogs, type LogEntry} from './log-reader.js';
 import {getInvalidReason} from './validation.js';
-import {getSessionPaths, readSessionRecord, writeSessionRecord, clearSessionRecord} from './session-store.js';
+import {getSessionPaths, readSessionRecord, writeSessionRecord, clearSessionRecord, type SessionRecord} from './session-store.js';
 import {runCommandToLog, startDetachedCommand} from './command-runner.js';
 import {stopSessionWithFallback} from './process-control.js';
 import {isProcessGroupAlive, killProcessGroup, killPortOwner, killOrphans} from './posix-process.js';
@@ -150,11 +150,11 @@ async function buildRows(
 
 async function stopRecordedSession(
 	pgid: number,
-	port: number,
+	ports: number[],
 	orphanMatchers: string[],
 ): Promise<void> {
 	const stopped = await stopSessionWithFallback(
-		{pgid, port, orphanMatchers},
+		{pgid, ports, orphanMatchers},
 		{
 			killProcessGroup,
 			killPortOwner,
@@ -165,6 +165,10 @@ async function stopRecordedSession(
 	if (!stopped) {
 		throw new Error(`Failed to stop existing session pgid=${pgid}`);
 	}
+}
+
+function sessionCleanupPorts(active: SessionRecord, configuredPorts: number[]): number[] {
+	return [...new Set([...(active.ports ?? [active.port]), ...configuredPorts])];
 }
 async function launchDetachedCommand(command: string[], cwd: string): Promise<void> {
 	const {promise, resolve, reject} = Promise.withResolvers<void>();
@@ -234,6 +238,7 @@ export async function buildActions(cwd: string): Promise<AppActions> {
 	return createRuntimeStateActions({
 		config,
 		paths,
+		workspaceRoot,
 		adapter: {
 			refresh: async () => buildInitialModel(cwd),
 			readActive: async () => readSessionRecord(paths, {isSessionAlive: isProcessGroupAlive}),
@@ -246,9 +251,9 @@ export async function buildActions(cwd: string): Promise<AppActions> {
 				return selected.branch;
 			},
 			getInvalidReason: async worktreePath => getInvalidReason(worktreePath, config.requiredFiles),
-			runSetup: runCommandToLog,
+			runSetup: async input => runCommandToLog({...input, workspaceRoot}),
 			startCommand: startDetachedCommand,
-			stopSession: async active => stopRecordedSession(active.pgid, active.port, config.orphanMatchers),
+			stopSession: async active => stopRecordedSession(active.pgid, sessionCleanupPorts(active, config.ports), config.orphanMatchers),
 			clearSession: async () => clearSessionRecord(paths),
 			writeSession: async record => writeSessionRecord(paths, record),
 			openEditor: async worktreePath => {
@@ -272,7 +277,7 @@ export async function buildActions(cwd: string): Promise<AppActions> {
 					return {kind: 'idle', message: `no pull request found for ${selected.branch}`};
 				}
 				if (pullRequest.kind === 'unavailable') {
-					return {kind: 'error', message: `pull request metadata is unavailable for ${selected.branch}`};
+					return {kind: 'idle', message: `pull request metadata unavailable for ${selected.branch}`};
 				}
 				await launchDetachedCommand(getBrowserOpenCommand(pullRequest.url), worktreePath);
 				return {kind: 'idle', message: `opened pull request #${pullRequest.number} for ${selected.branch}`};
@@ -287,7 +292,7 @@ export async function buildActions(cwd: string): Promise<AppActions> {
 				}
 				const active = await readSessionRecord(paths, {isSessionAlive: isProcessGroupAlive});
 				if (active?.worktreePath === worktreePath) {
-					await stopRecordedSession(active.pgid, active.port, config.orphanMatchers);
+					await stopRecordedSession(active.pgid, sessionCleanupPorts(active, config.ports), config.orphanMatchers);
 					await clearSessionRecord(paths);
 				}
 				await execFileAsync('git', ['worktree', 'remove', worktreePath], {cwd: workspaceRoot});

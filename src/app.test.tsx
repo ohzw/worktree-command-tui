@@ -292,7 +292,7 @@ it('stacks panes responsively on medium-width terminals when there is enough ver
 	expect(stripAnsi(lastFrame())).toContain('> - develop [root]');
 });
 
-it('shows more stacked worktree rows as terminal height grows', () => {
+it('shows logs while keeping stacked worktree rows on tall narrow terminals', () => {
 	const model = createModel({
 		rows: Array.from({length: 6}, (_, index) => ({
 			path: `/repo/.worktree/item-${index}`,
@@ -310,7 +310,7 @@ it('shows more stacked worktree rows as terminal height grows', () => {
 		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns, rows}} />,
 	);
 	const lines = stripAnsi(lastFrame() ?? '').split('\n');
-	expect(lines.join('\n')).not.toContain('Logs (*.log · tail 120)');
+	expect(lines.join('\n')).toContain('Logs (*.log · tail 120)');
 	const worktreesHeader = lines.findIndex(line => line.includes('Worktrees'));
 	const selectionHeader = lines.findIndex((line, index) => index > worktreesHeader && line.includes('Selection / Action'));
 	expect(worktreesHeader).toBeGreaterThan(-1);

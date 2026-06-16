@@ -263,9 +263,9 @@ export function App({
 	const compactLayout = !minimalLayout && shouldUseCompactLayout(rootWidth, rootHeight, model.rows.length);
 	const stackedLayout = !minimalLayout && !compactLayout && shouldStackPanes(rootWidth, rootHeight, model.rows.length);
 	const compactDetailPane = !stackedLayout && rootHeight <= 30 && model.rows.length > 1;
-	const showLogPanel = !stackedLayout && rootHeight >= 34;
+	const showLogPanel = rootHeight >= 34;
 	const logPaneHeight = showLogPanel ? getLogPaneHeight(rootHeight) : 0;
-	const stackedPaneHeight = Math.max(3, Math.floor((rootHeight - STACKED_LAYOUT_FRAME_ROWS) / 2));
+	const stackedPaneHeight = Math.max(3, Math.floor((rootHeight - STACKED_LAYOUT_FRAME_ROWS - logPaneHeight) / 2));
 	const paneHeight = stackedLayout
 		? stackedPaneHeight
 		: Math.max(3, rootHeight - STACKED_LAYOUT_FRAME_ROWS - logPaneHeight);

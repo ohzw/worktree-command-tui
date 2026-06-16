@@ -3,6 +3,9 @@
 `worktree-command-tui` is a terminal UI for managing Git worktrees from inside a repository.
 It keeps one active runtime session per namespace, lets you switch worktrees with the keyboard, and keeps logs/process cleanup tied to the repo's shared Git state.
 
+<img width="1023" height="582" alt="image" src="https://github.com/user-attachments/assets/ef33c2aa-0af4-4701-b1ec-fa9289e8ee3a" />
+
+
 ## Features
 
 - Discover worktrees from the current repository even when launched from a subdirectory

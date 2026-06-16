@@ -138,21 +138,12 @@ export function createRuntimeStateActions({config, paths, workspaceRoot, adapter
 
 	const start = async (worktreePath: string): Promise<AppModel> => {
 		const current = await adapter.readActive();
-		if (current?.worktreePath === worktreePath) {
-			const model = await adapter.refresh();
-			return {
-				...model,
-				activePath: current.worktreePath,
-				activeBranch: current.branch,
-				status: {kind: 'idle', message: 'already active'},
-			};
-		}
-
 		const invalidReason = await adapter.getInvalidReason(worktreePath);
 		if (invalidReason) {
 			throw new Error(invalidReason);
 		}
 
+		const isRestart = current?.worktreePath === worktreePath;
 		if (current) {
 			await adapter.stopSession(current);
 			await adapter.clearSession();
@@ -182,7 +173,7 @@ export function createRuntimeStateActions({config, paths, workspaceRoot, adapter
 			...model,
 			activePath: worktreePath,
 			activeBranch: branch,
-			status: {kind: 'running', message: `started ${branch}`},
+			status: {kind: 'running', message: `${isRestart ? 'restarted' : 'started'} ${branch}`},
 		};
 	};
 

@@ -6,7 +6,7 @@ It keeps one active runtime session per namespace, lets you switch worktrees wit
 ## Features
 
 - Discover worktrees from the current repository even when launched from a subdirectory
-- Start or switch the active worktree session with `Enter`
+- Start, switch, or restart the active worktree session with `Enter`
 - Stop the active session and clean up recorded orphan processes with `s`
 - Run an optional per-worktree setup command with `i`
 - Open the selected worktree in your editor with `e`
@@ -65,7 +65,7 @@ If config is missing, the CLI exits with a message telling you to run `wctui ini
 Primary shortcuts in the footer:
 
 - `↑↓` / `j` `k` — move selection
-- `Enter` — start or switch to selected worktree
+- `Enter` — start, switch to, or restart the selected worktree
 - `i` — run `setupCommand` when configured
 - `e` — open the selected worktree in the configured editor when `editorCommand` is configured
 - `o` — open the selected worktree's pull request when GitHub metadata is available
@@ -89,7 +89,7 @@ Additional shortcuts from the help window:
 
 `wctui` executes the argv commands stored in `.worktree-command-tui.jsonc` when you press the matching keys. Treat repository config as trusted code:
 
-- `Enter` starts `command` in the selected worktree.
+- `Enter` starts `command` in the selected worktree; pressing it on the active worktree restarts that session.
 - `i` runs `setupCommand`; package-manager install commands may run dependency lifecycle scripts.
 - `e` runs `editorCommand` with the selected worktree path appended.
 

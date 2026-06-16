@@ -54,9 +54,9 @@ export function decideEnterInteraction(selected: AppRow | undefined, activePath:
 	}
 	if (selected.path === activePath) {
 		return {
-			kind: 'set-status',
-			status: {kind: 'idle', message: 'already active'},
-			suppressesBackgroundRefreshes: true,
+			kind: 'start',
+			path: selected.path,
+			status: {kind: 'starting', message: `Restarting ${selected.branch}...`},
 		};
 	}
 	return {

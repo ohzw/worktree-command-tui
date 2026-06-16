@@ -15,7 +15,7 @@ function buildHelpLines(setupAvailable: boolean, editorAvailable: boolean): Help
 		{section: 'Scroll', binding: 'PageUp/PageDn', description: 'selection page'},
 		{section: 'Logs', binding: 'L', description: 'full-screen logs'},
 		{section: 'Logs', binding: '[/]', description: 'scroll log'},
-		{section: 'Actions', binding: 'Enter', description: 'start/switch worktree'},
+		{section: 'Actions', binding: 'Enter', description: 'start/switch/restart worktree'},
 	];
 	if (setupAvailable) {
 		lines.push({section: 'Actions', binding: 'i', description: 'setup selected worktree'});

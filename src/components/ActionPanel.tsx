@@ -125,7 +125,7 @@ function getActionMessage(selectedRow: AppRow, activePath: string | null): strin
 		return 'Cannot start this worktree.';
 	}
 	if (action.kind === 'active') {
-		return 'Already active. Press s to stop the current session.';
+		return 'Already active. Press Enter to restart, or s to stop.';
 	}
 	return 'Press Enter to start here and switch the active session.';
 }

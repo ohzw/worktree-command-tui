@@ -585,14 +585,14 @@ it('scrolls selection details with SGR mouse wheel in tall split layout', async 
 	const {lastFrame, stdin} = render(
 		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 34}} />,
 	);
-	expect(lastFrame()).not.toContain('Already active. Press s to stop the current session.');
+	expect(lastFrame()).not.toContain('Already active. Press Enter to restart, or s to stop.');
 	stdin.write(`\u001B[<65;${getShellDimensions(120, 34).listWidth + 2};6M`);
 	await waitForInput();
 	await waitForInput();
 	stdin.write(`\u001B[<65;${getShellDimensions(120, 34).listWidth + 2};6M`);
 	await waitForInput();
 	await waitForInput();
-	expect(lastFrame()).toContain('Already active. Press s to stop the current session.');
+	expect(lastFrame()).toContain('Already active. Press Enter to restart, or s to stop.');
 });
 
 it('scrolls the log pane with SGR mouse wheel input', async () => {
@@ -837,7 +837,7 @@ it('shows git and PR metadata in the selection pane', () => {
 	expect(lastFrame()).toContain('PR: #2125 draft/open → develop');
 	expect(lastFrame()).toContain('PR Title: Selection pane metadata');
 	expect(lastFrame()).toContain('[Action]');
-	expect(lastFrame()).toContain('Already active. Press s to stop the current session.');
+	expect(lastFrame()).toContain('Already active. Press Enter to restart, or s to stop.');
 });
 it('shows unavailable metadata when git or gh inspection fails', () => {
 	const model = createModel({
@@ -1139,11 +1139,11 @@ it('keeps the same worktree selected when start reorders the list', async () => 
 	expect(lastFrame()).toContain('Active: feat/b');
 	expect(lastFrame()).toContain('Path: .worktree/feat-b');
 	expect(lastFrame()).toContain('[Action]');
-	expect(lastFrame()).toContain('Already active. Press s to stop the current session.');
+	expect(lastFrame()).toContain('Already active. Press Enter to restart, or s to stop.');
 
 });
 
-it('continues refreshing logs after already-active enter feedback', async () => {
+it('continues refreshing logs while active sessions are running', async () => {
 	const model = createModel({
 		rows: [{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: ['active']}],
 		activePath: '/repo/.worktree/feat-a',
@@ -1151,18 +1151,12 @@ it('continues refreshing logs after already-active enter feedback', async () => 
 		status: {kind: 'running', message: 'Active: feat/a'},
 	});
 	const refreshLogs = vi.fn(async () => ({logs: model.logs, activePath: model.activePath, activeBranch: model.activeBranch}));
-	const start = vi.fn();
-	const {lastFrame, stdin} = render(<App initialModel={model} actions={{...makeFakeActions(model), refreshLogs, start}} windowSizeOverride={{columns: 120, rows: 30}} />);
-
-	stdin.write('\r');
-	await waitForInput();
-	expect(start).not.toHaveBeenCalled();
-	expect(lastFrame()).toContain('already active');
+	const {lastFrame} = render(<App initialModel={model} actions={{...makeFakeActions(model), refreshLogs}} windowSizeOverride={{columns: 120, rows: 30}} />);
 
 	await new Promise(resolve => setTimeout(resolve, 450));
 	await waitForInput();
 	expect(refreshLogs).toHaveBeenCalled();
-	expect(lastFrame()).toContain('already active');
+	expect(lastFrame()).toContain('Active: feat/a');
 });
 
 
@@ -1183,18 +1177,19 @@ it('converts start failures into error status instead of crashing the app', asyn
 	expect(lastFrame()).toContain('spawn failed: /tmp/logs/rojo-with-a-very-long-file-name-that-keeps-going-until-it-wraps-acro');
 });
 
-it('treats selecting the already-active worktree as a no-op refresh', async () => {
+it('restarts the already-active worktree when enter is pressed', async () => {
 	const model = createModel({
 		rows: [{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: ['active']}],
 		activePath: '/repo/.worktree/feat-a',
 		activeBranch: 'feat/a',
 	});
-	const start = vi.fn();
+	const restarted = {...model, status: {kind: 'running' as const, message: 'restarted feat/a'}};
+	const start = vi.fn(async () => restarted);
 	const {lastFrame, stdin} = render(<App initialModel={model} actions={{...makeFakeActions(model), start}} windowSizeOverride={{columns: 120, rows: 30}} />);
 	stdin.write('\r');
 	await waitForInput();
-	expect(start).not.toHaveBeenCalled();
-	expect(lastFrame()).toContain('already active');
+	expect(start).toHaveBeenCalledWith('/repo/.worktree/feat-a');
+	await vi.waitFor(() => expect(lastFrame()).toContain('restarted feat/a'));
 });
 
 it('runs setup command for the selected worktree when i is pressed', async () => {
@@ -1354,5 +1349,27 @@ it('ignores repeated enter presses while start is already in flight', async () =
 	expect(start).toHaveBeenCalledTimes(1);
 	deferred.resolve({...model, status: {kind: 'running', message: 'started feat/a'}});
 	await waitForInput();
+});
+
+it('debounces repeated enter presses after a fast start finishes', async () => {
+	const model = createModel({
+		rows: [{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: []}],
+		activePath: null,
+		activeBranch: null,
+	});
+	const start = vi.fn(async () => ({...model, activePath: '/repo/.worktree/feat-a', activeBranch: 'feat/a', status: {kind: 'running' as const, message: 'started feat/a'}}));
+	const now = vi.spyOn(Date, 'now').mockReturnValue(1000);
+	try {
+		const {stdin} = render(<App initialModel={model} actions={{...makeFakeActions(model), start}} windowSizeOverride={{columns: 120, rows: 30}} />);
+		stdin.write('\r');
+		await waitForInput();
+		await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+		now.mockReturnValue(1200);
+		stdin.write('\r');
+		await waitForInput();
+		expect(start).toHaveBeenCalledTimes(1);
+	} finally {
+		now.mockRestore();
+	}
 });
 

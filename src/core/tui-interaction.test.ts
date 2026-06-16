@@ -43,7 +43,7 @@ describe('selection decisions', () => {
 });
 
 describe('enter and setup decisions', () => {
-	it('returns status decisions for invalid and already-active worktrees without runtime commands', () => {
+	it('returns status decisions for invalid worktrees before restart decisions', () => {
 		expect(decideEnterInteraction(makeRow({invalidReason: 'Missing required files'}), null)).toEqual({
 			kind: 'set-status',
 			status: {kind: 'error', message: 'Missing required files'},
@@ -54,10 +54,10 @@ describe('enter and setup decisions', () => {
 			status: {kind: 'error', message: 'Still invalid'},
 			suppressesBackgroundRefreshes: true,
 		});
-		expect(decideEnterInteraction(makeRow({path: '/repo'}), '/repo')).toEqual({
-			kind: 'set-status',
-			status: {kind: 'idle', message: 'already active'},
-			suppressesBackgroundRefreshes: true,
+		expect(decideEnterInteraction(makeRow({path: '/repo', branch: 'develop'}), '/repo')).toEqual({
+			kind: 'start',
+			path: '/repo',
+			status: {kind: 'starting', message: 'Restarting develop...'},
 		});
 	});
 

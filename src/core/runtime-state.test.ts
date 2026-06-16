@@ -87,8 +87,8 @@ describe('createRuntimeStateActions', () => {
 		expect(model.status).toEqual({kind: 'idle', message: 'setup command is not configured'});
 	});
 
-	it('returns already-active status without validating or starting the same worktree', async () => {
-		const {adapter} = makeAdapter({
+	it('restarts the already-active worktree', async () => {
+		const {adapter, calls} = makeAdapter({
 			readActive: vi.fn(async () => activeRecord),
 			refresh: vi.fn(async () => ({...baseModel, activePath: '/repo', activeBranch: 'main'})),
 		});
@@ -96,11 +96,18 @@ describe('createRuntimeStateActions', () => {
 
 		const model = await actions.start('/repo');
 
-		expect(adapter.getInvalidReason).not.toHaveBeenCalled();
-		expect(adapter.startCommand).not.toHaveBeenCalled();
+		expect(adapter.getInvalidReason).toHaveBeenCalledWith('/repo');
+		expect(adapter.stopSession).toHaveBeenCalledWith(activeRecord);
+		expect(adapter.startCommand).toHaveBeenCalledWith({
+			command: ['npm', 'start'],
+			cwd: '/repo',
+			logsDir: paths.logsDir,
+			logFileBase: 'main',
+		});
+		expect(calls).toEqual(['stop', 'clear', 'write']);
 		expect(model.activePath).toBe('/repo');
 		expect(model.activeBranch).toBe('main');
-		expect(model.status).toEqual({kind: 'idle', message: 'already active'});
+		expect(model.status).toEqual({kind: 'running', message: 'restarted main'});
 	});
 
 	it('rejects invalid worktrees before stopping the current session', async () => {

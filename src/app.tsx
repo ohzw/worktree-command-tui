@@ -96,7 +96,7 @@ function getLogPaneHeight(_rootHeight: number): number {
 }
 
 const ACTIVE_TAG: RowTag = 'active';
-const ALREADY_ACTIVE_MESSAGE = 'already active';
+const REPEATED_ENTER_DEBOUNCE_MS = 750;
 
 function syncActiveTags(rows: AppRow[], activePath: string | null): AppRow[] {
 	let changed = false;
@@ -117,13 +117,7 @@ function syncActiveTags(rows: AppRow[], activePath: string | null): AppRow[] {
 }
 
 function shouldRefreshLogs(model: AppModel): boolean {
-	if (model.activePath === null) {
-		return false;
-	}
-	if (model.status.kind === 'running' || model.status.kind === 'error') {
-		return true;
-	}
-	return model.status.message === ALREADY_ACTIVE_MESSAGE;
+	return model.activePath !== null && (model.status.kind === 'running' || model.status.kind === 'error');
 }
 
 function getStatusAfterLogRefresh(current: AppModel, refresh: AppLogRefresh): AppStatus {
@@ -168,6 +162,7 @@ export function App({
 	const logRefreshInFlightRef = useRef(false);
 	const actionGenerationRef = useRef(0);
 	const previousStatusRef = useRef<AppStatus['kind']>(initialModel.status.kind);
+	const lastStartRequestRef = useRef<{path: string | null; atMs: number}>({path: null, atMs: 0});
 	const alertTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	useEffect(() => {
@@ -181,7 +176,8 @@ export function App({
 	useEffect(() => {
 		const becameRunning = previousStatusRef.current === 'starting' && model.status.kind === 'running';
 		if (becameRunning) {
-			setCompletedAlert(model.activeBranch ? `Switched to ${model.activeBranch}` : 'Worktree switch complete.');
+			const switchedAlert = model.activeBranch ? `Switched to ${model.activeBranch}` : 'Worktree switch complete.';
+			setCompletedAlert(model.status.message.startsWith('restarted ') && model.activeBranch ? `Restarted ${model.activeBranch}` : switchedAlert);
 			if (alertTimeoutRef.current !== null) {
 				clearTimeout(alertTimeoutRef.current);
 			}
@@ -190,7 +186,7 @@ export function App({
 			}, 2500);
 		}
 		previousStatusRef.current = model.status.kind;
-	}, [model.status.kind, model.activeBranch]);
+	}, [model.status.kind, model.status.message, model.activeBranch]);
 
 	useEffect(() => {
 		return () => {
@@ -316,6 +312,16 @@ export function App({
 			userActionInFlightRef.current = false;
 		}
 	}
+	function shouldAcceptStartRequest(path: string): boolean {
+		const nowMs = Date.now();
+		const last = lastStartRequestRef.current;
+		if (last.path === path && nowMs - last.atMs < REPEATED_ENTER_DEBOUNCE_MS) {
+			return false;
+		}
+		last.path = path;
+		last.atMs = nowMs;
+		return true;
+	}
 
 	useInput((input, key) => {
 		if (isHelpOverlayOpen) {
@@ -431,6 +437,9 @@ export function App({
 				}
 				setModel(current => ({...current, status: decision.status}));
 				clearTransientAlert();
+				return;
+			}
+			if (!shouldAcceptStartRequest(decision.path)) {
 				return;
 			}
 			setModel(current => ({...current, status: decision.status}));

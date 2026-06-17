@@ -116,6 +116,26 @@ function syncActiveTags(rows: AppRow[], activePath: string | null): AppRow[] {
 	return changed ? nextRows : rows;
 }
 
+function rowMatchesFilter(row: AppRow, normalizedQuery: string): boolean {
+	if (normalizedQuery === '') {
+		return true;
+	}
+	const pullRequest = row.pullRequest?.kind === 'found' ? row.pullRequest : null;
+	return row.branch.toLowerCase().includes(normalizedQuery)
+		|| row.path.toLowerCase().includes(normalizedQuery)
+		|| row.shortPath.toLowerCase().includes(normalizedQuery)
+		|| (pullRequest !== null && (`${pullRequest.number} ${pullRequest.title}`).toLowerCase().includes(normalizedQuery));
+}
+
+function filterRows(rows: AppRow[], query: string): AppRow[] {
+	const normalizedQuery = query.trim().toLowerCase();
+	if (normalizedQuery === '') {
+		return rows;
+	}
+	return rows.filter(row => rowMatchesFilter(row, normalizedQuery));
+}
+
+
 function shouldRefreshLogs(model: AppModel): boolean {
 	return model.activePath !== null && (model.status.kind === 'running' || model.status.kind === 'error');
 }
@@ -150,7 +170,10 @@ export function App({
 	const liveWindowSize = useWindowSize();
 	const {columns, rows} = windowSizeOverride ?? liveWindowSize;
 	const [model, setModel] = useState(initialModel);
-	const [selectedPath, setSelectedPath] = useState<string | null>(initialModel.rows[0]?.path ?? null);
+	const [filterQuery, setFilterQuery] = useState('');
+	const [isFilterInputOpen, setIsFilterInputOpen] = useState(false);
+	const visibleRows = useMemo(() => filterRows(model.rows, filterQuery), [model.rows, filterQuery]);
+	const [selectedPath, setSelectedPath] = useState<string | null>(visibleRows[0]?.path ?? null);
 	const [selectionScrollOffset, setSelectionScrollOffset] = useState(0);
 	const [worktreeScrollOffset, setWorktreeScrollOffset] = useState(0);
 	const [logScrollOffset, setLogScrollOffset] = useState(0);
@@ -166,8 +189,8 @@ export function App({
 	const alertTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	useEffect(() => {
-		setSelectedPath(currentPath => getNextSelectedPath(model.rows, currentPath));
-	}, [model.rows]);
+		setSelectedPath(currentPath => getNextSelectedPath(visibleRows, currentPath));
+	}, [visibleRows]);
 
 	useEffect(() => {
 		setSelectionScrollOffset(0);
@@ -252,13 +275,13 @@ export function App({
 	}, [confirmationOpen, model.rows, pendingDelete]);
 
 
-	const selectedIndex = useMemo(() => getSelectedIndex(model.rows, selectedPath), [model.rows, selectedPath]);
-	const selected = model.rows[selectedIndex];
+	const selectedIndex = useMemo(() => getSelectedIndex(visibleRows, selectedPath), [visibleRows, selectedPath]);
+	const selected = visibleRows[selectedIndex];
 	const {rootWidth, rootHeight, bodyWidth, listWidth, actionWidth} = getShellDimensions(columns, rows);
 	const minimalLayout = shouldUseMinimalLayout(rootWidth, rootHeight);
-	const compactLayout = !minimalLayout && shouldUseCompactLayout(rootWidth, rootHeight, model.rows.length);
-	const stackedLayout = !minimalLayout && !compactLayout && shouldStackPanes(rootWidth, rootHeight, model.rows.length);
-	const compactDetailPane = !stackedLayout && rootHeight <= 30 && model.rows.length > 1;
+	const compactLayout = !minimalLayout && shouldUseCompactLayout(rootWidth, rootHeight, visibleRows.length);
+	const stackedLayout = !minimalLayout && !compactLayout && shouldStackPanes(rootWidth, rootHeight, visibleRows.length);
+	const compactDetailPane = !stackedLayout && rootHeight <= 30 && visibleRows.length > 1;
 	const showLogPanel = rootHeight >= 34;
 	const logPaneHeight = showLogPanel ? getLogPaneHeight(rootHeight) : 0;
 	const stackedPaneHeight = Math.max(3, Math.floor((rootHeight - STACKED_LAYOUT_FRAME_ROWS - logPaneHeight) / 2));
@@ -274,11 +297,16 @@ export function App({
 	const logScrollPageSize = Math.max(1, Math.floor((logViewportHeight || rootHeight) / 2));
 
 	function moveSelection(nextIndex: number): void {
-		const clampedIndex = clampSelectionIndex(nextIndex, model.rows.length);
+		const clampedIndex = clampSelectionIndex(nextIndex, visibleRows.length);
 		if (clampedIndex === null) {
 			return;
 		}
-		setSelectedPath(model.rows[clampedIndex]!.path);
+		setSelectedPath(visibleRows[clampedIndex]!.path);
+	}
+
+	function clearFilter(): void {
+		setFilterQuery('');
+		setIsFilterInputOpen(false);
 	}
 
 	function clearTransientAlert(): void {
@@ -322,6 +350,31 @@ export function App({
 		last.atMs = nowMs;
 		return true;
 	}
+
+	function startSelectedWorktree(): void {
+		if (userActionInFlightRef.current) {
+			return;
+		}
+		const decision = decideEnterInteraction(selected, model.activePath);
+		if (decision.kind === 'ignore') {
+			return;
+		}
+		if (decision.kind === 'set-status') {
+			if (decision.suppressesBackgroundRefreshes) {
+				invalidateStaleLogRefreshes();
+			}
+			setModel(current => ({...current, status: decision.status}));
+			clearTransientAlert();
+			return;
+		}
+		if (!shouldAcceptStartRequest(decision.path)) {
+			return;
+		}
+		setModel(current => ({...current, status: decision.status}));
+		clearTransientAlert();
+		void apply(() => actions.start(decision.path));
+	}
+
 
 	useInput((input, key) => {
 		if (isHelpOverlayOpen) {
@@ -379,6 +432,44 @@ export function App({
 			}
 			return;
 		}
+		if (isFilterInputOpen) {
+			if (key.escape || input === '\u001B') {
+				clearFilter();
+				return;
+			}
+			if (key.upArrow) {
+				moveSelection(selectedIndex - 1);
+				return;
+			}
+			if (key.downArrow) {
+				moveSelection(selectedIndex + 1);
+				return;
+			}
+			if (key.pageDown) {
+				setSelectionScrollOffset(current => current + selectionScrollPageSize);
+				return;
+			}
+			if (key.pageUp) {
+				setSelectionScrollOffset(current => Math.max(0, current - selectionScrollPageSize));
+				return;
+			}
+			if (key.backspace || key.delete) {
+				setFilterQuery(current => current.slice(0, -1));
+				return;
+			}
+			if (key.return) {
+				startSelectedWorktree();
+				return;
+			}
+			if (input && !key.ctrl && !key.meta) {
+				setFilterQuery(current => current + input);
+			}
+			return;
+		}
+		if (input === '/') {
+			setIsFilterInputOpen(true);
+			return;
+		}
 		if (key.escape || input === 'q') {
 			exit();
 			return;
@@ -396,7 +487,7 @@ export function App({
 			return;
 		}
 		if (input === 'G') {
-			moveSelection(model.rows.length - 1);
+			moveSelection(visibleRows.length - 1);
 			return;
 		}
 		if (input === '?') {
@@ -423,28 +514,8 @@ export function App({
 			setSelectionScrollOffset(current => Math.max(0, current - selectionScrollPageSize));
 			return;
 		}
-		if (userActionInFlightRef.current) {
-			return;
-		}
 		if (key.return) {
-			const decision = decideEnterInteraction(selected, model.activePath);
-			if (decision.kind === 'ignore') {
-				return;
-			}
-			if (decision.kind === 'set-status') {
-				if (decision.suppressesBackgroundRefreshes) {
-					invalidateStaleLogRefreshes();
-				}
-				setModel(current => ({...current, status: decision.status}));
-				clearTransientAlert();
-				return;
-			}
-			if (!shouldAcceptStartRequest(decision.path)) {
-				return;
-			}
-			setModel(current => ({...current, status: decision.status}));
-			clearTransientAlert();
-			void apply(() => actions.start(decision.path));
+			startSelectedWorktree();
 			return;
 		}
 		if (input === 's') {
@@ -528,7 +599,7 @@ export function App({
 						if (listPaneViewportHeight === undefined) {
 							return 0;
 						}
-						const max = Math.max(0, model.rows.length - listPaneViewportHeight);
+						const max = Math.max(0, visibleRows.length - listPaneViewportHeight);
 						return Math.max(0, Math.min(max, current + event.delta * mouseWheelLineStep));
 					});
 				};
@@ -591,7 +662,7 @@ export function App({
 				stdout.write(DISABLE_MOUSE_TRACKING);
 			}
 		};
-	}, [stdin, stdout, listWidth, stackedLayout, listPaneViewportHeight, mouseWheelLineStep, model.rows.length, showLogPanel, logPaneTop, logPaneBottom, maxLogScrollOffset, worktreePaneRight, selectionPaneLeft, bodyPaneTop, bodyPaneBottom, stackedWorktreePaneTop, stackedWorktreePaneBottom, stackedSelectionPaneTop, stackedSelectionPaneBottom, isLogOverlayOpen, isHelpOverlayOpen]);
+	}, [stdin, stdout, listWidth, stackedLayout, listPaneViewportHeight, mouseWheelLineStep, visibleRows.length, showLogPanel, logPaneTop, logPaneBottom, maxLogScrollOffset, worktreePaneRight, selectionPaneLeft, bodyPaneTop, bodyPaneBottom, stackedWorktreePaneTop, stackedWorktreePaneBottom, stackedSelectionPaneTop, stackedSelectionPaneBottom, isLogOverlayOpen, isHelpOverlayOpen]);
 
 	useEffect(() => {
 		if (listPaneViewportHeight === undefined) {
@@ -599,7 +670,7 @@ export function App({
 			return;
 		}
 		setWorktreeScrollOffset(current => {
-			const max = Math.max(0, model.rows.length - listPaneViewportHeight);
+			const max = Math.max(0, visibleRows.length - listPaneViewportHeight);
 			if (selectedIndex < current) {
 				return Math.max(0, selectedIndex);
 			}
@@ -608,7 +679,7 @@ export function App({
 			}
 			return Math.min(current, max);
 		});
-	}, [selectedIndex, listPaneViewportHeight, model.rows.length]);
+	}, [selectedIndex, listPaneViewportHeight, visibleRows.length]);
 
 	useEffect(() => {
 		if (!showLogPanel && !isLogOverlayOpen) {
@@ -657,7 +728,7 @@ export function App({
 				{rootHeight >= 4 ? (
 					confirmationOpen
 						? <Text dimColor wrap="truncate-end">d/y confirm · Esc/n/q cancel</Text>
-						: <Text dimColor wrap="truncate-end">↑↓jk↵{model.setupAvailable ? 'i' : ''}{model.editorAvailable ? 'e' : ''}odLq</Text>
+						: <Text dimColor wrap="truncate-end">↑↓jk/↵{model.setupAvailable ? 'i' : ''}{model.editorAvailable ? 'e' : ''}odLq</Text>
 				) : null}
 			</Box>
 		);
@@ -680,7 +751,7 @@ export function App({
 				<Text dimColor wrap="truncate-end">
 					{confirmationOpen
 						? 'Keys: d/y confirm | Esc/n/q cancel'
-						: `Keys: ↑↓/jk g/G ↵${model.setupAvailable ? ' i' : ''}${model.editorAvailable ? ' e' : ''} o d L s r q · Resize terminal for split view`}
+						: `Keys: ↑↓/jk g/G / Filter ↵${model.setupAvailable ? ' i' : ''}${model.editorAvailable ? ' e' : ''} o d L s r q · Resize terminal for split view`}
 				</Text>
 			</Box>
 		);
@@ -691,12 +762,15 @@ export function App({
 			<Header repoName={model.repoName} namespace={model.namespace} activeBranch={model.activeBranch} />
 			<Box flexDirection={stackedLayout ? 'column' : 'row'} flexGrow={stackedLayout ? 0 : 1} flexShrink={1}>
 				<WorktreeList
-					rows={model.rows}
+					rows={visibleRows}
 					selectedIndex={selectedIndex}
 					width={stackedLayout ? bodyWidth : listWidth}
 					height={paneHeight}
 					stacked={stackedLayout}
 					scrollOffset={worktreeScrollOffset}
+					filterQuery={filterQuery}
+					isFilterInputOpen={isFilterInputOpen}
+					totalRowCount={model.rows.length}
 				/>
 				<ActionPanel selectedRow={selected} activePath={model.activePath} setupAvailable={model.setupAvailable} stacked={stackedLayout} width={stackedLayout ? bodyWidth : actionWidth} height={paneHeight} compactDetails={compactDetailPane} scrollOffset={selectionScrollOffset} />
 			</Box>

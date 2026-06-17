@@ -40,6 +40,8 @@ function buildKeyHints(setupAvailable: boolean, editorAvailable: boolean, confir
 		{binding: '↑↓/jk', label: 'Move'},
 		{binding: 'Enter', label: 'Switch'},
 	];
+	hints.push({binding: '/', label: 'Filter'});
+
 	if (setupAvailable) {
 		hints.push({binding: 'i', label: 'Setup'});
 	}

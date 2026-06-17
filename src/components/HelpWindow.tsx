@@ -16,6 +16,8 @@ function buildHelpLines(setupAvailable: boolean, editorAvailable: boolean): Help
 		{section: 'Logs', binding: 'L', description: 'full-screen logs'},
 		{section: 'Logs', binding: '[/]', description: 'scroll log'},
 		{section: 'Actions', binding: 'Enter', description: 'start/switch/restart worktree'},
+		{section: 'Filter', binding: '/', description: 'filter by branch, path, or pull request'},
+		{section: 'Filter', binding: 'Esc', description: 'clear filter'},
 	];
 	if (setupAvailable) {
 		lines.push({section: 'Actions', binding: 'i', description: 'setup selected worktree'});

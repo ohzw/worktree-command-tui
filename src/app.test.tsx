@@ -121,7 +121,7 @@ it('renders colored pane labels and active marker in the main layout', () => {
 	expect(lastFrame()).toContain('Worktrees');
 	expect(lastFrame()).toContain('Selection / Action');
 	expect(lastFrame()).toContain('idle');
-	expect(lastFrame()).toContain('↑↓/jk Move | Enter Switch | e Editor | o Open PR | d Delete | L Logs | s Stop | r Refresh | ? Help | q Quit');
+	expect(lastFrame()).toContain('/ Filter');
 	expect(lastFrame()).not.toContain('PageUp');
 	expect(stripAnsi(lastFrame())).toContain('* feat/a');
 });
@@ -135,7 +135,7 @@ it('renders setup in the primary key hints only when setup is available', () => 
 	).lastFrame()).not.toContain('i Setup');
 	expect(render(
 		<App initialModel={enabled} actions={makeFakeActions(enabled)} windowSizeOverride={{columns: 140, rows: 30}} />,
-	).lastFrame()).toContain('Enter Switch | i Setup | e Editor');
+	).lastFrame()).toContain('/ Filter | i Setup | e Editor');
 });
 
 it('hides editor hints when no editor command is configured', () => {
@@ -687,17 +687,17 @@ it('renders a minimal fallback shell on very short terminals', () => {
 	expect(lastFrame()).toContain('A:develop');
 	expect(lastFrame()).toContain('S:develop');
 	expect(lastFrame()).toContain('T:idle');
-	expect(lastFrame()).toContain('↑↓jk↵eodLq');
+	expect(lastFrame()).toContain('↑↓jk/↵eodLq');
 });
 
 it('shows setup shortcut in the minimal shell only when setup is configured', () => {
 	const base = createModel({rows: [{path: '/repo', shortPath: '.', branch: 'develop', tags: ['main']}], activePath: '/repo', activeBranch: 'develop'});
 	const withoutSetup = render(<App initialModel={base} actions={makeFakeActions(base)} windowSizeOverride={{columns: 30, rows: 8}} />);
-	expect(withoutSetup.lastFrame()).toContain('↑↓jk↵eodLq');
+	expect(withoutSetup.lastFrame()).toContain('↑↓jk/↵eodLq');
 
 	const withSetup = createModel({...base, setupAvailable: true});
 	const withSetupRender = render(<App initialModel={withSetup} actions={makeFakeActions(withSetup)} windowSizeOverride={{columns: 30, rows: 8}} />);
-	expect(withSetupRender.lastFrame()).toContain('↑↓jk↵ieodLq');
+	expect(withSetupRender.lastFrame()).toContain('↑↓jk/↵ieodLq');
 });
 
 it('shows delete confirmation in the minimal layout', async () => {
@@ -745,7 +745,7 @@ it('renders a minimal fallback shell on extremely small terminals', () => {
 	expect(lastFrame()).toContain('A:devel…');
 	expect(lastFrame()).toContain('S:devel…');
 	expect(lastFrame()).toContain('T:idle');
-	expect(lastFrame()).toContain('↑↓jk↵eo…');
+	expect(lastFrame()).toContain('↑↓jk/↵e…');
 });
 
 it('sanitizes branch and status text in the minimal fallback shell', () => {
@@ -952,6 +952,105 @@ it('supports vim-style movement keys', async () => {
 	stdin.write('k');
 	await waitForInput();
 	expect(lastFrame()).toContain('Branch: develop');
+});
+
+it('filters worktrees by branch, path, and pull request metadata', async () => {
+	const model = createModel({
+		rows: [
+			{path: '/repo', shortPath: '.', branch: 'develop', tags: ['main']},
+			{path: '/repo/.worktree/feature-login', shortPath: '.worktree/feature-login', branch: 'feat/login', tags: []},
+			{
+				path: '/repo/.worktree/bugfix',
+				shortPath: '.worktree/bugfix',
+				branch: 'fix/auth',
+				tags: [],
+				pullRequest: {
+					kind: 'found',
+					number: 24,
+					title: 'Add searchable worktree list',
+					url: 'https://github.com/ohzw/worktree-command-tui/pull/24',
+					state: 'OPEN',
+					isDraft: false,
+					baseBranch: 'main',
+				},
+			},
+		],
+		activePath: null,
+		activeBranch: null,
+	});
+	const firstRender = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />);
+
+	firstRender.stdin.write('/');
+	await waitForInput();
+	expect(stripAnsi(firstRender.lastFrame())).toContain('Worktrees /█ (3/3)');
+	firstRender.stdin.write('LOGIN');
+	await waitForInput();
+	expect(stripAnsi(firstRender.lastFrame())).toContain('Worktrees /LOGIN█ (1/3)');
+	expect(firstRender.lastFrame()).toContain('Branch: feat/login');
+	expect(stripAnsi(firstRender.lastFrame())).not.toContain('fix/auth');
+	firstRender.unmount();
+
+	const secondRender = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />);
+	secondRender.stdin.write('/');
+	await waitForInput();
+	secondRender.stdin.write('searchable');
+	await waitForInput();
+	expect(secondRender.lastFrame()).toContain('Branch: fix/auth');
+});
+
+it('keeps movement and actions scoped to filtered worktrees', async () => {
+	const model = createModel({
+		rows: [
+			{path: '/repo', shortPath: '.', branch: 'develop', tags: ['main']},
+			{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: []},
+			{path: '/repo/.worktree/feat-b', shortPath: '.worktree/feat-b', branch: 'feat/b', tags: []},
+		],
+		activePath: null,
+		activeBranch: null,
+	});
+	const start = vi.fn(async () => model);
+	const {lastFrame, stdin} = render(<App initialModel={model} actions={{...makeFakeActions(model), start}} windowSizeOverride={{columns: 120, rows: 30}} />);
+
+	stdin.write('/');
+	await waitForInput();
+	stdin.write('feat');
+	await waitForInput();
+	expect(lastFrame()).toContain('Branch: feat/a');
+	stdin.write('\u001B[B');
+	await waitForInput();
+	expect(lastFrame()).toContain('Branch: feat/b');
+	stdin.write('\r');
+	await waitForInput();
+	expect(start).toHaveBeenCalledWith('/repo/.worktree/feat-b');
+});
+
+it('shows an explicit empty filter result and restores selection when cleared', async () => {
+	const model = createModel({
+		rows: [
+			{path: '/repo', shortPath: '.', branch: 'develop', tags: ['main']},
+			{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: []},
+		],
+		activePath: null,
+		activeBranch: null,
+	});
+	const start = vi.fn(async () => model);
+	const {lastFrame, stdin} = render(<App initialModel={model} actions={{...makeFakeActions(model), start}} windowSizeOverride={{columns: 120, rows: 30}} />);
+
+	stdin.write('/');
+	await waitForInput();
+	stdin.write('missing');
+	await waitForInput();
+	expect(lastFrame()).toContain('No worktrees match filter.');
+	expect(lastFrame()).toContain('No worktrees found.');
+	stdin.write('\u001B[B');
+	stdin.write('\r');
+	await waitForInput();
+	expect(start).not.toHaveBeenCalled();
+
+	stdin.write('\u001B');
+	await new Promise(resolve => setTimeout(resolve, 30));
+	expect(lastFrame()).toContain('Branch: develop');
+	expect(stripAnsi(lastFrame())).not.toContain('No worktrees match filter.');
 });
 
 it('shows invalid reason instead of starting when enter is pressed on invalid worktree', async () => {

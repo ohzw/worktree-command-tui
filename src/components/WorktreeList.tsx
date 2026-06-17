@@ -48,6 +48,9 @@ export function WorktreeList({
 	height,
 	stacked,
 	scrollOffset = 0,
+	filterQuery = '',
+	isFilterInputOpen = false,
+	totalRowCount = rows.length,
 }: {
 	rows: AppRow[];
 	selectedIndex: number;
@@ -55,6 +58,9 @@ export function WorktreeList({
 	height?: number;
 	stacked: boolean;
 	scrollOffset?: number;
+	filterQuery?: string;
+	isFilterInputOpen?: boolean;
+	totalRowCount?: number;
 }) {
 	const branchWidth = Math.max(MIN_BRANCH_WIDTH, (width ?? 34) - 7);
 	const viewport = sliceListViewport(rows, height === undefined ? rows.length : height - 3, scrollOffset);
@@ -63,6 +69,11 @@ export function WorktreeList({
 	const visibleRows = viewport.visibleItems;
 	const showScrollbar = height !== undefined && rows.length > contentViewportHeight;
 	const scrollbarThumbRows = showScrollbar ? getScrollbarThumbRows(rows.length, contentViewportHeight, effectiveScrollOffset) : new Set<number>();
+	const hasFilter = filterQuery.trim() !== '';
+	const filterText = sanitizeInlineText(filterQuery);
+	const title = hasFilter || isFilterInputOpen
+		? `Worktrees /${filterText}${isFilterInputOpen ? '█' : ''} (${rows.length}/${totalRowCount})`
+		: 'Worktrees';
 
 	return (
 		<Box
@@ -76,9 +87,14 @@ export function WorktreeList({
 			paddingX={1}
 			overflowY="hidden"
 		>
-			<Text bold color="cyan">
-				Worktrees
+			<Text bold color="cyan" wrap="truncate-end">
+				{title}
 			</Text>
+			{rows.length === 0 ? (
+				<Text dimColor wrap="truncate-end">
+					No worktrees match filter.
+				</Text>
+			) : null}
 			{visibleRows.map((row, index) => {
 				const isSelected = index + effectiveScrollOffset === selectedIndex;
 				const projection = projectWorktreeListRow(row, isSelected);

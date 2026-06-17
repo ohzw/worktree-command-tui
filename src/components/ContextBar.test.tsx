@@ -39,7 +39,7 @@ describe('ContextBar', () => {
 			.filter(element => element.props.color === 'white')
 			.map(element => textContent(element.props.children));
 
-		expect(whiteText).toEqual(expect.arrayContaining(['↑↓/jk', 'Enter', 'i', 'e', 'o', 'd', 'L', 's', 'r', '?', 'q']));
+		expect(whiteText).toEqual(expect.arrayContaining(['↑↓/jk', 'Enter', '/', 'i', 'e', 'o', 'd', 'L', 's', 'r', '?', 'q']));
 		expect(whiteText).not.toContain('PageUp');
 		expect(whiteText).not.toContain('Switch');
 	});

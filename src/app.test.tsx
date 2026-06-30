@@ -49,8 +49,8 @@ function stripAnsi(value: string | null | undefined): string {
 }
 
 
-it('uses alternate screen and incremental rendering options', () => {
-	expect(APP_RENDER_OPTIONS).toEqual({alternateScreen: true, exitOnCtrlC: true, incrementalRendering: true});
+it('uses stable alternate-screen rendering options', () => {
+	expect(APP_RENDER_OPTIONS).toEqual({alternateScreen: true, exitOnCtrlC: true, incrementalRendering: false});
 });
 
 it('uses the full terminal width for pane layout', () => {

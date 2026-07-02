@@ -9,7 +9,7 @@ import {FloatingLogWindow} from './components/FloatingLogWindow.js';
 import {LogPanel, buildLogLines} from './components/LogPanel.js';
 import {WorktreeList} from './components/WorktreeList.js';
 import type {AppActions, AppLogRefresh, AppModel, AppRow, AppStatus, RowTag} from './core/runtime.js';
-import {clampSelectionIndex, decideEnterInteraction, decideSetupInteraction, getNextSelectedPath, getSelectedIndex} from './core/tui-interaction.js';
+import {clampSelectionIndex, decideEnterInteraction, decideSetupInteraction, getNextSelectedPath, getSelectedIndex, wrapSelectionIndex} from './core/tui-interaction.js';
 import {sanitizeInlineText} from './core/worktree-projection.js';
 
 export interface ShellDimensions {
@@ -296,12 +296,14 @@ export function App({
 	const maxLogScrollOffset = Math.max(0, logLineCount - logViewportHeight);
 	const logScrollPageSize = Math.max(1, Math.floor((logViewportHeight || rootHeight) / 2));
 
-	function moveSelection(nextIndex: number): void {
-		const clampedIndex = clampSelectionIndex(nextIndex, visibleRows.length);
-		if (clampedIndex === null) {
+	function moveSelection(nextIndex: number, mode: 'clamp' | 'wrap' = 'clamp'): void {
+		const nextSelectionIndex = mode === 'wrap'
+			? wrapSelectionIndex(nextIndex, visibleRows.length)
+			: clampSelectionIndex(nextIndex, visibleRows.length);
+		if (nextSelectionIndex === null) {
 			return;
 		}
-		setSelectedPath(visibleRows[clampedIndex]!.path);
+		setSelectedPath(visibleRows[nextSelectionIndex]!.path);
 	}
 
 	function clearFilter(): void {
@@ -438,11 +440,11 @@ export function App({
 				return;
 			}
 			if (key.upArrow) {
-				moveSelection(selectedIndex - 1);
+				moveSelection(selectedIndex - 1, 'wrap');
 				return;
 			}
 			if (key.downArrow) {
-				moveSelection(selectedIndex + 1);
+				moveSelection(selectedIndex + 1, 'wrap');
 				return;
 			}
 			if (key.pageDown) {
@@ -475,11 +477,11 @@ export function App({
 			return;
 		}
 		if (key.upArrow || input === 'k') {
-			moveSelection(selectedIndex - 1);
+			moveSelection(selectedIndex - 1, 'wrap');
 			return;
 		}
 		if (key.downArrow || input === 'j') {
-			moveSelection(selectedIndex + 1);
+			moveSelection(selectedIndex + 1, 'wrap');
 			return;
 		}
 		if (input === 'g') {

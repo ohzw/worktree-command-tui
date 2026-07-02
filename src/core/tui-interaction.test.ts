@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {
 	clampSelectionIndex,
+	wrapSelectionIndex,
 	getNextSelectedPath,
 	getSelectedIndex,
 	shouldApplyAsyncResult,
@@ -39,6 +40,13 @@ describe('selection decisions', () => {
 		expect(clampSelectionIndex(-1, rows.length)).toBe(0);
 		expect(clampSelectionIndex(99, rows.length)).toBe(2);
 		expect(clampSelectionIndex(0, 0)).toBeNull();
+	});
+
+	it('wraps movement across list boundaries without inventing a selection for an empty list', () => {
+		expect(wrapSelectionIndex(-1, rows.length)).toBe(2);
+		expect(wrapSelectionIndex(3, rows.length)).toBe(0);
+		expect(wrapSelectionIndex(4, rows.length)).toBe(1);
+		expect(wrapSelectionIndex(0, 0)).toBeNull();
 	});
 });
 

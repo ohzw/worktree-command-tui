@@ -2,6 +2,7 @@ import {describe, expect, it} from 'vitest';
 import {
 	getOrderedNonActiveTags,
 	projectAction,
+	projectHeadCommit,
 	projectNote,
 	projectPullRequest,
 	projectWorktreeListRow,
@@ -24,6 +25,24 @@ function makeRow(overrides: Partial<AppRow> = {}): AppRow {
 describe('sanitizeInlineText', () => {
 	it('normalizes inline TUI text without preserving control characters', () => {
 		expect(sanitizeInlineText(' feature\n\tbranch\u200B  name\u0007 ')).toBe('feature branch name');
+	});
+});
+
+describe('projectHeadCommit', () => {
+	it('produces a sanitized head summary from the short hash and commit message', () => {
+		expect(projectHeadCommit(makeRow({
+			headSha: '46af3f1c',
+			headCommit: {message: 'Selection\npane\u001b[2J metadata'},
+		}))).toEqual({
+			kind: 'found',
+			hash: '46af3f1c',
+			message: 'Selection pane metadata',
+			label: '46af3f1c Selection pane metadata',
+		});
+	});
+
+	it('treats missing commit metadata as unavailable', () => {
+		expect(projectHeadCommit(makeRow())).toEqual({kind: 'unavailable'});
 	});
 });
 

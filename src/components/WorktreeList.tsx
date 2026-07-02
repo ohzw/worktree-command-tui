@@ -1,6 +1,6 @@
 import {Box, Text} from 'ink';
 import type {AppRow} from '../core/runtime.js';
-import {projectWorktreeListRow, sanitizeInlineText} from '../core/worktree-projection.js';
+import {projectHeadCommit, projectWorktreeListRow, sanitizeInlineText} from '../core/worktree-projection.js';
 import {getScrollbarThumbRows, sliceListViewport} from '../terminal/viewport.js';
 
 const MIN_BRANCH_WIDTH = 24;
@@ -62,7 +62,7 @@ export function WorktreeList({
 	isFilterInputOpen?: boolean;
 	totalRowCount?: number;
 }) {
-	const branchWidth = Math.max(MIN_BRANCH_WIDTH, (width ?? 34) - 7);
+	const contentWidth = Math.max(1, (width ?? 34) - 7);
 	const viewport = sliceListViewport(rows, height === undefined ? rows.length : height - 3, scrollOffset);
 	const contentViewportHeight = viewport.viewportHeight;
 	const effectiveScrollOffset = viewport.scrollOffset;
@@ -101,7 +101,15 @@ export function WorktreeList({
 				const tagSuffix = projection.isMain ? ' [root]' : '';
 				const color = getRowColor(projection);
 				const branchText = sanitizeInlineText(row.branch);
-				const line = `${isSelected ? '>' : ' '} ${getIndicator(projection.state)} ${truncateLabel(branchText, Math.max(1, branchWidth - tagSuffix.length))}${tagSuffix}`;
+				const headCommit = projectHeadCommit(row);
+				const commitText = headCommit.kind === 'found' ? headCommit.label : '';
+				const commitWidth = commitText.length > 0 ? Math.min(commitText.length, Math.max(0, contentWidth - MIN_BRANCH_WIDTH - 1 - tagSuffix.length)) : 0;
+				const showCommit = commitWidth >= 8;
+				const branchLabelWidth = showCommit
+					? Math.max(1, contentWidth - commitWidth - 1 - tagSuffix.length)
+					: Math.max(1, contentWidth - tagSuffix.length);
+				const commitSuffix = showCommit ? ` ${truncateLabel(commitText, commitWidth)}` : '';
+				const line = `${isSelected ? '>' : ' '} ${getIndicator(projection.state)} ${truncateLabel(branchText, branchLabelWidth)}${tagSuffix}${commitSuffix}`;
 				return (
 					<Box key={row.path} flexDirection="row">
 						<Box flexGrow={1} flexShrink={1}>

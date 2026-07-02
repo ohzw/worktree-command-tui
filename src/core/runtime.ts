@@ -3,7 +3,7 @@ import path from 'node:path';
 import {promisify} from 'node:util';
 import {loadToolConfig} from './config-lifecycle.js';
 import {readWorktrees, sortWorktrees, toShortPath, type WorktreeRow} from './git-worktrees.js';
-import {readGitStatusSummary, readBranchCreatedAtMs, resolveRepoContext, type UpstreamInfo, type WorkingTreeInfo} from './git-metadata.js';
+import {readGitStatusSummary, readBranchCreatedAtMs, readHeadCommitInfo, resolveRepoContext, type UpstreamInfo, type WorkingTreeInfo, type HeadCommitInfo} from './git-metadata.js';
 import {readPullRequestInfo, type PullRequestInfo} from './github-metadata.js';
 import {readLogs, type LogEntry} from './log-reader.js';
 import {getInvalidReason} from './validation.js';
@@ -23,6 +23,7 @@ export interface AppRow {
 	shortPath: string;
 	branch: string;
 	headSha?: string;
+	headCommit?: HeadCommitInfo;
 	tags: RowTag[];
 	upstream?: UpstreamInfo;
 	upstreamUnavailable?: boolean;
@@ -77,11 +78,12 @@ function shortenSha(headSha: string): string {
 async function readRowMetadata(
 	worktreePath: string,
 	branch: string,
-): Promise<Pick<AppRow, 'upstream' | 'upstreamUnavailable' | 'workingTree' | 'pullRequest' | 'branchCreatedAtMs'>> {
-	const [statusSummary, pullRequest, branchCreatedAtMs] = await Promise.all([
+): Promise<Pick<AppRow, 'upstream' | 'upstreamUnavailable' | 'workingTree' | 'pullRequest' | 'branchCreatedAtMs' | 'headCommit'>> {
+	const [statusSummary, pullRequest, branchCreatedAtMs, headCommit] = await Promise.all([
 		readGitStatusSummary(worktreePath),
 		readPullRequestInfo(worktreePath, branch),
 		readBranchCreatedAtMs(worktreePath, branch),
+		readHeadCommitInfo(worktreePath),
 	]);
 	return {
 		upstream: statusSummary.upstream,
@@ -89,6 +91,7 @@ async function readRowMetadata(
 		workingTree: statusSummary.workingTree,
 		pullRequest,
 		branchCreatedAtMs: branchCreatedAtMs ?? undefined,
+		headCommit: headCommit ?? undefined,
 	};
 }
 
@@ -97,7 +100,7 @@ export function toAppRow(
 	worktree: WorktreeRow,
 	activePath: string | null,
 	invalidReason: string | null,
-	metadata: Pick<AppRow, 'upstream' | 'upstreamUnavailable' | 'workingTree' | 'pullRequest' | 'branchCreatedAtMs'>,
+	metadata: Pick<AppRow, 'upstream' | 'upstreamUnavailable' | 'workingTree' | 'pullRequest' | 'branchCreatedAtMs' | 'headCommit'>,
 ): AppRow {
 	const tags: RowTag[] = [];
 	if (worktree.isMain) {
@@ -124,6 +127,7 @@ export function toAppRow(
 		workingTree: metadata.workingTree,
 		pullRequest: metadata.pullRequest,
 		branchCreatedAtMs: metadata.branchCreatedAtMs,
+		headCommit: metadata.headCommit,
 		invalidReason: invalidReason ?? undefined,
 	};
 }

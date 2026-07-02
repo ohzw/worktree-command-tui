@@ -41,6 +41,13 @@ export function clampSelectionIndex(nextIndex: number, rowCount: number): number
 	return Math.min(Math.max(nextIndex, 0), rowCount - 1);
 }
 
+export function wrapSelectionIndex(nextIndex: number, rowCount: number): number | null {
+	if (rowCount <= 0) {
+		return null;
+	}
+	return ((nextIndex % rowCount) + rowCount) % rowCount;
+}
+
 export function decideEnterInteraction(selected: AppRow | undefined, activePath: string | null): EnterInteractionDecision {
 	if (selected === undefined) {
 		return {kind: 'ignore'};

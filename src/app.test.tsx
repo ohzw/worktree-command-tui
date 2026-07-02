@@ -954,6 +954,42 @@ it('supports vim-style movement keys', async () => {
 	expect(lastFrame()).toContain('Branch: develop');
 });
 
+it('wraps selection around the worktree list boundaries', async () => {
+	const model = createModel({
+		rows: [
+			{path: '/repo', shortPath: '.', branch: 'develop', tags: ['main']},
+			{path: '/repo/.worktree/feat-a', shortPath: '.worktree/feat-a', branch: 'feat/a', tags: []},
+			{path: '/repo/.worktree/feat-b', shortPath: '.worktree/feat-b', branch: 'feat/b', tags: []},
+		],
+		activePath: null,
+		activeBranch: null,
+	});
+	const {lastFrame, stdin} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />);
+
+	expect(stripAnsi(lastFrame())).toContain('Branch: develop');
+
+	stdin.write('k');
+	await waitForInput();
+	expect(stripAnsi(lastFrame())).toContain('Branch: feat/b');
+
+	stdin.write('j');
+	await waitForInput();
+	expect(stripAnsi(lastFrame())).toContain('Branch: develop');
+
+	stdin.write('j');
+	await waitForInput();
+	expect(stripAnsi(lastFrame())).toContain('Branch: feat/a');
+
+	stdin.write('j');
+	await waitForInput();
+	expect(stripAnsi(lastFrame())).toContain('Branch: feat/b');
+
+	stdin.write('j');
+	await waitForInput();
+	expect(stripAnsi(lastFrame())).toContain('Branch: develop');
+});
+
+
 it('filters worktrees by branch, path, and pull request metadata', async () => {
 	const model = createModel({
 		rows: [

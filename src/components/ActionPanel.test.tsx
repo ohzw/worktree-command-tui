@@ -1,5 +1,7 @@
+import React from 'react';
+import {render} from 'ink-testing-library';
 import {describe, expect, it} from 'vitest';
-import {getActionVariant, getPullRequestColor} from './ActionPanel.js';
+import {ActionPanel, getActionVariant, getPullRequestColor} from './ActionPanel.js';
 import type {AppRow} from '../core/runtime.js';
 
 function makeRow(overrides: Partial<AppRow> = {}): AppRow {
@@ -10,6 +12,10 @@ function makeRow(overrides: Partial<AppRow> = {}): AppRow {
 		tags: [],
 		...overrides,
 	};
+}
+
+function stripAnsi(value: string | null | undefined): string {
+	return (value ?? '').replace(/\u001B\[[0-9;]*m/g, '');
 }
 
 describe('getPullRequestColor', () => {
@@ -31,5 +37,47 @@ describe('getActionVariant', () => {
 		expect(getActionVariant(makeRow({workingTree: {staged: 0, unstaged: 0, untracked: 1, conflicts: 0}}), null)).toBe('info');
 		expect(getActionVariant(makeRow({tags: ['active']}), '/repo/.worktree/feat-a')).toBe('success');
 		expect(getActionVariant(makeRow(), null)).toBe('info');
+	});
+});
+
+describe('ActionPanel', () => {
+	it('renders the selected row head summary in the detail pane', () => {
+		const {lastFrame} = render(
+			<ActionPanel
+				selectedRow={makeRow({
+					headSha: '46af3f1c',
+					headCommit: {message: 'Selection\npane\u001b[2J metadata'},
+				})}
+				activePath={null}
+				setupAvailable={false}
+				stacked={false}
+				width={100}
+				height={20}
+			/>,
+		);
+
+		const frame = stripAnsi(lastFrame());
+		expect(frame).toContain('Selection / Action');
+		expect(frame).toContain('HEAD: 46af3f1c Selection pane metadata');
+		expect(frame).not.toContain('undefined');
+		expect(frame).not.toContain('null');
+	});
+
+	it('falls back safely when head metadata is missing', () => {
+		const {lastFrame} = render(
+			<ActionPanel
+				selectedRow={makeRow()}
+				activePath={null}
+				setupAvailable={false}
+				stacked={false}
+				width={100}
+				height={20}
+			/>,
+		);
+
+		const frame = stripAnsi(lastFrame());
+		expect(frame).toContain('HEAD: -');
+		expect(frame).not.toContain('undefined');
+		expect(frame).not.toContain('null');
 	});
 });

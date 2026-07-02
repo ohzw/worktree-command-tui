@@ -331,6 +331,7 @@ it('keeps running status after setup when a session is active', async () => {
 });
 describe('toAppRow', () => {
 	it('preserves collected metadata in the rendered row', () => {
+		const headCommit = {message: 'Selection pane metadata'};
 		const row = toAppRow(
 			'/repo',
 			{
@@ -356,6 +357,7 @@ describe('toAppRow', () => {
 					isDraft: true,
 					baseBranch: 'develop',
 				},
+				headCommit,
 			},
 		);
 
@@ -372,6 +374,7 @@ describe('toAppRow', () => {
 			baseBranch: 'develop',
 		});
 		expect(row.headSha).toBe('46af3f1c');
+		expect(row.headCommit).toEqual(headCommit);
 		expect(row.shortPath).toBe('.worktree/feat-a');
 	});
 });

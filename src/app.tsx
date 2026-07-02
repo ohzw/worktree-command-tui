@@ -121,9 +121,11 @@ function rowMatchesFilter(row: AppRow, normalizedQuery: string): boolean {
 		return true;
 	}
 	const pullRequest = row.pullRequest?.kind === 'found' ? row.pullRequest : null;
+	const headCommit = `${row.headSha ?? ''} ${row.headCommit?.message ?? ''}`.toLowerCase();
 	return row.branch.toLowerCase().includes(normalizedQuery)
 		|| row.path.toLowerCase().includes(normalizedQuery)
 		|| row.shortPath.toLowerCase().includes(normalizedQuery)
+		|| headCommit.includes(normalizedQuery)
 		|| (pullRequest !== null && (`${pullRequest.number} ${pullRequest.title}`).toLowerCase().includes(normalizedQuery));
 }
 

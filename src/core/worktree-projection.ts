@@ -30,6 +30,10 @@ export type UpstreamProjection =
 	| {kind: 'none'}
 	| {kind: 'found'; branch: string; ahead: number; behind: number};
 
+export type HeadCommitProjection =
+	| {kind: 'unavailable'}
+	| {kind: 'found'; hash?: string; message?: string; label: string};
+
 export type WorkingTreePartKind = 'staged' | 'unstaged' | 'untracked' | 'conflicts';
 export type WorkingTreeProjection =
 	| {kind: 'unavailable'}
@@ -98,6 +102,21 @@ export function projectWorktreeListRow(row: AppRow, isSelected: boolean): Worktr
 		state,
 		isSelected,
 		isMain: hasTag(row, 'main'),
+	};
+}
+
+export function projectHeadCommit(row: AppRow): HeadCommitProjection {
+	const hash = sanitizeInlineText(row.headSha ?? '');
+	const message = sanitizeInlineText(row.headCommit?.message ?? '');
+	if (hash.length === 0 && message.length === 0) {
+		return {kind: 'unavailable'};
+	}
+
+	return {
+		kind: 'found',
+		hash: hash.length === 0 ? undefined : hash,
+		message: message.length === 0 ? undefined : message,
+		label: [hash, message].filter(part => part.length > 0).join(' '),
 	};
 }
 

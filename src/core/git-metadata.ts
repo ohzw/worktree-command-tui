@@ -23,6 +23,10 @@ export interface GitStatusSummary {
 	workingTree?: WorkingTreeInfo;
 }
 
+export interface HeadCommitInfo {
+	message: string;
+}
+
 export interface RepoContext {
 	workspaceRoot: string;
 	mainWorktreePath: string;
@@ -99,6 +103,15 @@ export async function readBranchCreatedAtMs(cwd: string, branch: string): Promis
 		const timestamps = trimmed.split('\n');
 		const firstTimestampSeconds = Number(timestamps.at(-1));
 		return Number.isFinite(firstTimestampSeconds) ? firstTimestampSeconds * 1000 : null;
+	} catch {
+		return null;
+	}
+}
+
+export async function readHeadCommitInfo(cwd: string): Promise<HeadCommitInfo | null> {
+	try {
+		const {stdout} = await execFileAsync('git', ['log', '-1', '--format=%s'], {cwd});
+		return {message: stdout.trim()};
 	} catch {
 		return null;
 	}

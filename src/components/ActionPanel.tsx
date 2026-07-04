@@ -3,6 +3,7 @@ import type {AppRow} from '../core/runtime.js';
 import {
 	getOrderedNonActiveTags,
 	projectAction,
+	projectHeadCommit,
 	projectNote,
 	projectPullRequest,
 	projectUpstream,
@@ -91,6 +92,14 @@ function formatPullRequest(selectedRow: AppRow): string {
 	const draft = pullRequest.isDraft ? 'draft/' : '';
 	const stateText = pullRequest.state.toLowerCase();
 	return `#${pullRequest.number} ${draft}${stateText} → ${pullRequest.baseBranch}`;
+}
+
+function formatHeadCommit(selectedRow: AppRow): string {
+	const headCommit = projectHeadCommit(selectedRow);
+	if (headCommit.kind === 'unavailable') {
+		return '-';
+	}
+	return headCommit.label;
 }
 
 function getPullRequestColorFromProjection(pullRequest: PullRequestProjection): 'green' | 'yellow' | 'red' | undefined {
@@ -194,7 +203,7 @@ function getPanelLines(selectedRow: AppRow | undefined, activePath: string | nul
 	if (showFullPath) {
 		lines.push({text: `Full Path: ${sanitizeInlineText(selectedRow.path)}`});
 	}
-	lines.push({text: `HEAD: ${selectedRow.headSha || '-'}`});
+	lines.push({text: `HEAD: ${formatHeadCommit(selectedRow)}`});
 	lines.push({text: `Branch Created: ${formatUtcDateTime(selectedRow.branchCreatedAtMs)}`});
 
 	if (showTags) {

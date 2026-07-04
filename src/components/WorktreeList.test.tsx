@@ -43,7 +43,7 @@ function getRowText(tree: ReactNode, needle: string): string {
 }
 
 describe('WorktreeList', () => {
-	it('renders the head summary with a short hash and sanitized commit message', () => {
+	it('renders the branch label without head commit metadata in list rows', () => {
 		const rows: AppRow[] = [
 			{
 				path: '/repo/.worktree/feat-a',
@@ -58,7 +58,9 @@ describe('WorktreeList', () => {
 		const tree = WorktreeList({rows, selectedIndex: 0, width: 80, height: 10, stacked: false});
 		const rowText = getRowText(tree, 'feat/a');
 
-		expect(rowText).toContain('46af3f1c Selection pane metadata');
+		expect(rowText).toContain('feat/a');
+		expect(rowText).not.toContain('46af3f1c');
+		expect(rowText).not.toContain('Selection pane metadata');
 		expect(rowText).not.toContain('\u001b');
 	});
 
@@ -84,21 +86,4 @@ describe('WorktreeList', () => {
 		expect(rowText).not.toContain('Selection pane metadata');
 	});
 
-	it('omits absent head metadata without rendering undefined or null', () => {
-		const rows: AppRow[] = [
-			{
-				path: '/repo/.worktree/feat-b',
-				shortPath: '.worktree/feat-b',
-				branch: 'feat/b',
-				tags: ['external'],
-			},
-		];
-
-		const tree = WorktreeList({rows, selectedIndex: 0, width: 80, height: 10, stacked: false});
-		const rowText = getRowText(tree, 'feat/b');
-
-		expect(rowText).not.toContain('undefined');
-		expect(rowText).not.toContain('null');
-		expect(rowText).toContain('feat/b');
-	});
 });

@@ -1,7 +1,6 @@
-import React from 'react';
 import {render} from 'ink-testing-library';
 import {expect, it, vi} from 'vitest';
-import {App, getMouseWheelDelta, getShellDimensions, shouldStackPanes, shouldUseCompactLayout, shouldUseMinimalLayout} from './app.js';
+import {App, getModelAfterLogRefresh, getMouseWheelDelta, getShellDimensions, shouldStackPanes, shouldUseCompactLayout, shouldUseMinimalLayout} from './app.js';
 import type {AppActions, AppModel, RowTag} from './core/runtime.js';
 import {APP_RENDER_OPTIONS} from './render-options.js';
 
@@ -77,6 +76,75 @@ it('renders one fullscreen frame for each responsive layout', () => {
 	]) {
 		const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={windowSizeOverride} />);
 		expect((lastFrame() ?? '').split('\n')).toHaveLength(windowSizeOverride.rows);
+	}
+});
+
+it('debounces rerenders from window size changes after the initial frame', async () => {
+	vi.useFakeTimers();
+	let unmount: (() => void) | undefined;
+	try {
+		const model = createModel();
+		const actions = makeFakeActions(model);
+		const rendered = render(
+			<App initialModel={model} actions={actions} windowSizeOverride={{columns: 120, rows: 30}} resizeDebounceMs={100} />,
+		);
+		const {lastFrame, rerender} = rendered;
+		unmount = rendered.unmount;
+		expect(lastFrame()).toContain('Worktree Command TUI');
+
+		rerender(<App initialModel={model} actions={actions} windowSizeOverride={{columns: 8, rows: 4}} resizeDebounceMs={100} />);
+		expect(lastFrame()).toContain('Worktree Command TUI');
+		expect(lastFrame()).not.toContain('A:feat/a');
+
+		vi.advanceTimersByTime(100);
+		await vi.runOnlyPendingTimersAsync();
+		const inputSettled = waitForInput();
+		vi.advanceTimersByTime(10);
+		await inputSettled;
+
+		expect(lastFrame()).toContain('A:feat/a');
+	} finally {
+		unmount?.();
+		vi.useRealTimers();
+	}
+});
+
+it('coalesces live stdout resize events before rendering the app shell', async () => {
+	vi.useFakeTimers();
+	let unmount: (() => void) | undefined;
+	try {
+		const model = createModel();
+		const actions = makeFakeActions(model);
+		const rendered = render(<App initialModel={model} actions={actions} resizeDebounceMs={100} />);
+		const {lastFrame, stdout} = rendered;
+		unmount = rendered.unmount;
+		let columns = 120;
+		let rows = 30;
+		Object.defineProperty(stdout, 'columns', {configurable: true, get: () => columns});
+		Object.defineProperty(stdout, 'rows', {configurable: true, get: () => rows});
+		expect(lastFrame()).toContain('Worktree Command TUI');
+
+		const frameCountBeforeResize = stdout.frames.length;
+		for (const [nextColumns, nextRows] of [[8, 4], [120, 30], [8, 4]] as const) {
+			columns = nextColumns;
+			rows = nextRows;
+			stdout.emit('resize');
+		}
+
+		expect(stdout.frames).toHaveLength(frameCountBeforeResize);
+		expect(lastFrame()).toContain('Worktree Command TUI');
+		expect(lastFrame()).not.toContain('A:feat/a');
+
+		vi.advanceTimersByTime(100);
+		await vi.runOnlyPendingTimersAsync();
+		const inputSettled = waitForInput();
+		vi.advanceTimersByTime(10);
+		await inputSettled;
+
+		expect(lastFrame()).toContain('A:feat/a');
+	} finally {
+		unmount?.();
+		vi.useRealTimers();
 	}
 });
 
@@ -411,6 +479,31 @@ it('refreshes logs in near real time while running', async () => {
 	await waitForInput();
 	expect(actions.refreshLogs).toHaveBeenCalled();
 	expect(lastFrame()).toContain('new output');
+});
+
+it('getModelAfterLogRefresh returns the same model for unchanged log refreshes', () => {
+	const model = createModel({status: {kind: 'running', message: 'Active: feat/a'}});
+	const result = getModelAfterLogRefresh(model, {
+		logs: model.logs.map(log => ({...log})),
+		activePath: model.activePath,
+		activeBranch: model.activeBranch,
+	});
+
+	expect(result).toBe(model);
+});
+
+it('getModelAfterLogRefresh applies changed logs and stale session liveness', () => {
+	const model = createModel({status: {kind: 'running', message: 'Active: feat/a'}});
+	const result = getModelAfterLogRefresh(model, {
+		logs: [{name: 'feat-a.log', path: '/repo/.git/worktree-command-tui/logs/feat-a.log', content: 'ready\nserver stopped'}],
+		activePath: null,
+		activeBranch: null,
+	});
+
+	expect(result).not.toBe(model);
+	expect(result.status).toEqual({kind: 'idle', message: 'session ended'});
+	expect(result.activePath).toBeNull();
+	expect(result.rows.some(row => row.tags.includes('active'))).toBe(false);
 });
 
 it('clears stale running state when log refresh observes no active session', async () => {

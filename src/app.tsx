@@ -1,6 +1,6 @@
 import {Alert, Spinner} from '@inkjs/ui';
-import {useEffect, useMemo, useRef, useState} from 'react';
-import {Box, Text, useApp, useInput, useStdin, useStdout, useWindowSize} from 'ink';
+import {memo, useEffect, useMemo, useRef, useState} from 'react';
+import {Box, Text, useApp, useInput, useStdin, useStdout} from 'ink';
 import {ActionPanel} from './components/ActionPanel.js';
 import {ContextBar} from './components/ContextBar.js';
 import {Header} from './components/Header.js';
@@ -8,7 +8,7 @@ import {HelpWindow} from './components/HelpWindow.js';
 import {FloatingLogWindow} from './components/FloatingLogWindow.js';
 import {LogPanel, buildLogLines} from './components/LogPanel.js';
 import {WorktreeList} from './components/WorktreeList.js';
-import type {AppActions, AppLogRefresh, AppModel, AppRow, AppStatus, RowTag} from './core/runtime.js';
+import type {AppActions, AppLogEntry, AppLogRefresh, AppModel, AppRow, AppStatus, RowTag} from './core/runtime.js';
 import {clampSelectionIndex, decideEnterInteraction, decideSetupInteraction, getNextSelectedPath, getSelectedIndex, wrapSelectionIndex} from './core/tui-interaction.js';
 import {sanitizeInlineText} from './core/worktree-projection.js';
 
@@ -84,6 +84,7 @@ const HEADER_HEIGHT = 5;
 const CONTEXT_BAR_HEIGHT = 4;
 const PANE_GAP_WIDTH = 1;
 const MIN_STACKED_PANE_HEIGHT = 9;
+export const RESIZE_DEBOUNCE_MS = 100;
 
 export function shouldStackPanes(columns: number, rows: number, _worktreeCount = 0): boolean {
 	// Header + context bar consume the fixed chrome; each stacked pane still keeps ~6 visible content lines at the minimum height.
@@ -157,20 +158,137 @@ function getStatusAfterLogRefresh(current: AppModel, refresh: AppLogRefresh): Ap
 	}
 	return {kind: 'running', message: 'running'};
 }
+
+function areLogsEqual(left: AppLogEntry[], right: AppLogEntry[]): boolean {
+	if (left.length !== right.length) {
+		return false;
+	}
+
+	return left.every((entry, index) => {
+		const other = right[index];
+		return other !== undefined
+			&& entry.name === other.name
+			&& entry.path === other.path
+			&& entry.content === other.content;
+	});
+}
+
+export function getModelAfterLogRefresh(current: AppModel, refresh: AppLogRefresh): AppModel {
+	const activeChanged = current.activePath !== refresh.activePath || current.activeBranch !== refresh.activeBranch;
+	const status = getStatusAfterLogRefresh(current, refresh);
+	const logsChanged = !areLogsEqual(current.logs, refresh.logs);
+	const statusChanged = current.status.kind !== status.kind || current.status.message !== status.message;
+	const rows = activeChanged ? syncActiveTags(current.rows, refresh.activePath) : current.rows;
+
+	if (!activeChanged && !logsChanged && !statusChanged) {
+		return current;
+	}
+
+	return {
+		...current,
+		logs: refresh.logs,
+		activePath: refresh.activePath,
+		activeBranch: refresh.activeBranch,
+		status,
+		rows,
+	};
+}
+
+function readWindowSize(stdout: {columns?: number; rows?: number}): AppWindowSize {
+	return {
+		columns: stdout.columns || process.stdout.columns || 80,
+		rows: stdout.rows || process.stdout.rows || 24,
+	};
+}
+
+function useDebouncedWindowSize(windowSizeOverride: AppWindowSize | undefined, debounceMs: number): AppWindowSize {
+	const {stdout} = useStdout();
+	const resizeTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
+	const [stableWindowSize, setStableWindowSize] = useState(() => windowSizeOverride ?? readWindowSize(stdout));
+
+	useEffect(() => {
+		return () => {
+			clearTimeout(resizeTimerRef.current);
+		};
+	}, []);
+
+	useEffect(() => {
+		if (windowSizeOverride === undefined) {
+			return;
+		}
+		clearTimeout(resizeTimerRef.current);
+		if (stableWindowSize.columns === windowSizeOverride.columns && stableWindowSize.rows === windowSizeOverride.rows) {
+			return;
+		}
+
+		resizeTimerRef.current = setTimeout(() => {
+			resizeTimerRef.current = undefined;
+			setStableWindowSize({columns: windowSizeOverride.columns, rows: windowSizeOverride.rows});
+		}, debounceMs);
+	}, [windowSizeOverride?.columns, windowSizeOverride?.rows, debounceMs, stableWindowSize.columns, stableWindowSize.rows]);
+
+	useEffect(() => {
+		if (windowSizeOverride !== undefined) {
+			return;
+		}
+
+		const scheduleResize = () => {
+			const nextWindowSize = readWindowSize(stdout);
+			clearTimeout(resizeTimerRef.current);
+			if (stableWindowSize.columns === nextWindowSize.columns && stableWindowSize.rows === nextWindowSize.rows) {
+				return;
+			}
+
+			resizeTimerRef.current = setTimeout(() => {
+				resizeTimerRef.current = undefined;
+				setStableWindowSize(nextWindowSize);
+			}, debounceMs);
+		};
+
+		scheduleResize();
+		stdout.on('resize', scheduleResize);
+		return () => {
+			stdout.off('resize', scheduleResize);
+		};
+	}, [stdout, windowSizeOverride, debounceMs, stableWindowSize.columns, stableWindowSize.rows]);
+
+	return stableWindowSize;
+}
+interface AppShellProps {
+	initialModel: AppModel;
+	actions: AppActions;
+	windowSize: AppWindowSize;
+}
+
 export function App({
 	initialModel,
 	actions,
 	windowSizeOverride,
+	resizeDebounceMs,
 }: {
 	initialModel: AppModel;
 	actions: AppActions;
 	windowSizeOverride?: AppWindowSize;
+	resizeDebounceMs?: number;
 }) {
+	const stableWindowSize = useDebouncedWindowSize(windowSizeOverride, resizeDebounceMs ?? RESIZE_DEBOUNCE_MS);
+
+	return <MemoizedAppShell initialModel={initialModel} actions={actions} windowSize={stableWindowSize} />;
+}
+
+function AppShell(props: AppShellProps) {
+	return <AppShellContent {...props} />;
+}
+
+function AppShellContent({
+	initialModel,
+	actions,
+	windowSize,
+}: AppShellProps) {
 	const {exit} = useApp();
 	const {stdin} = useStdin();
 	const {stdout} = useStdout();
-	const liveWindowSize = useWindowSize();
-	const {columns, rows} = windowSizeOverride ?? liveWindowSize;
+	const {columns, rows} = windowSize;
 	const [model, setModel] = useState(initialModel);
 	const [filterQuery, setFilterQuery] = useState('');
 	const [isFilterInputOpen, setIsFilterInputOpen] = useState(false);
@@ -246,18 +364,7 @@ export function App({
 						return;
 					}
 
-					setModel(current => {
-						const activeChanged = current.activePath !== refresh.activePath || current.activeBranch !== refresh.activeBranch;
-						const status = getStatusAfterLogRefresh(current, refresh);
-						return {
-							...current,
-							logs: refresh.logs,
-							activePath: refresh.activePath,
-							activeBranch: refresh.activeBranch,
-							status,
-							rows: activeChanged ? syncActiveTags(current.rows, refresh.activePath) : current.rows,
-						};
-					});
+					setModel(current => getModelAfterLogRefresh(current, refresh));
 				})
 				.catch(() => {})
 				.finally(() => {
@@ -788,3 +895,5 @@ export function App({
 		</Box>
 	);
 }
+
+const MemoizedAppShell = memo(AppShell);

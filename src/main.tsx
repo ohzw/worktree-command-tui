@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-import React from 'react';
 import {createConfigForRepo, parseInitArgs} from './core/init.js';
 import {CONFIG_FILE_NAME, CONFIG_FILE_NAMES} from './core/config.js';
 import {sanitizeInlineText} from './core/worktree-projection.js';
 import {ThemeProvider} from '@inkjs/ui';
 import {render} from 'ink';
 import {APP_RENDER_OPTIONS} from './render-options.js';
-import {App} from './app.js';
+import {App, RESIZE_DEBOUNCE_MS} from './app.js';
 import {buildActions, buildInitialModel} from './core/runtime.js';
+import {debounceResizeListeners} from './core/debounced-resize.js';
 import {appTheme} from './ui-theme.js';
 
 const cwd = process.cwd();
@@ -75,6 +75,8 @@ if (subcommand !== undefined) {
 	process.exit(1);
 }
 
+let restoreStdoutResize = () => {};
+
 try {
 	const [initialModel, actions] = await Promise.all([buildInitialModel(cwd), buildActions(cwd)]);
 	const createApp = () => (
@@ -82,28 +84,17 @@ try {
 			<App initialModel={initialModel} actions={actions} />
 		</ThemeProvider>
 	);
-	const instance = render(createApp(), APP_RENDER_OPTIONS);
-	let repaintTimer: ReturnType<typeof setTimeout> | undefined;
-	const repaintAfterResize = () => {
-		// Give Ink/useWindowSize one tick to observe the new size, then force a fresh root render.
-		if (repaintTimer) {
-			clearTimeout(repaintTimer);
-		}
-		repaintTimer = setTimeout(() => {
-			instance.rerender(createApp());
-		}, 25);
-	};
-
 	if (process.stdout.isTTY) {
-		process.stdout.on('resize', repaintAfterResize);
+		restoreStdoutResize = debounceResizeListeners(process.stdout, RESIZE_DEBOUNCE_MS);
+	}
+	const instance = render(createApp(), APP_RENDER_OPTIONS);
+	if (process.stdout.isTTY) {
 		void instance.waitUntilExit().finally(() => {
-			if (repaintTimer) {
-				clearTimeout(repaintTimer);
-			}
-			process.stdout.off('resize', repaintAfterResize);
+			restoreStdoutResize();
 		});
 	}
 } catch (error) {
+	restoreStdoutResize();
 	console.error(sanitizeInlineText(describeError(error)));
 	process.exit(1);
 }

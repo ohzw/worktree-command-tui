@@ -1,8 +1,8 @@
 import React, {type ReactElement, type ReactNode} from 'react';
 import {describe, expect, it} from 'vitest';
-import {ContextBar} from './ContextBar.js';
+import {ShortcutBar} from './ShortcutBar.js';
 
-type InspectableElement = ReactElement<{children?: ReactNode; color?: string; dimColor?: boolean}>;
+type InspectableElement = ReactElement<{children?: ReactNode; color?: string; dimColor?: boolean; borderStyle?: string}>;
 
 function textContent(node: ReactNode): string {
 	if (typeof node === 'string' || typeof node === 'number') {
@@ -32,9 +32,9 @@ function collectElements(node: ReactNode): InspectableElement[] {
 	return [node, ...collectElements(node.props.children)];
 }
 
-describe('ContextBar', () => {
+describe('ShortcutBar', () => {
 	it('renders key bindings in white while leaving key labels dimmed', () => {
-		const tree = ContextBar({status: {kind: 'idle', message: 'ready'}, setupAvailable: true, editorAvailable: true, confirmationOpen: false});
+		const tree = ShortcutBar({setupAvailable: true, editorAvailable: true, confirmationOpen: false});
 		const whiteText = collectElements(tree)
 			.filter(element => element.props.color === 'white')
 			.map(element => textContent(element.props.children));
@@ -44,14 +44,15 @@ describe('ContextBar', () => {
 		expect(whiteText).not.toContain('Switch');
 	});
 
-	it('dims labels and separators without dimming the key bindings container', () => {
-		const tree = ContextBar({status: {kind: 'idle', message: 'ready'}, setupAvailable: false, editorAvailable: false, confirmationOpen: false});
+	it('renders one borderless shortcut line', () => {
+		const tree = ShortcutBar({setupAvailable: false, editorAvailable: false, confirmationOpen: false});
 		const textElements = collectElements(tree);
 		const helpContainer = textElements.find(element => textContent(element.props.children).startsWith('↑↓/jk'));
 		const dimmedText = textElements
 			.filter(element => element.props.dimColor === true)
 			.map(element => textContent(element.props.children));
 
+		expect(tree.props.borderStyle).toBeUndefined();
 		expect(helpContainer?.props.dimColor).not.toBe(true);
 		expect(textContent(tree)).not.toContain('Keys:');
 		expect(dimmedText).toEqual(expect.arrayContaining([' Move', ' | ']));
@@ -59,7 +60,7 @@ describe('ContextBar', () => {
 	});
 
 	it('swaps normal shortcuts for delete confirmation hints when armed', () => {
-		const tree = ContextBar({status: {kind: 'idle', message: 'Delete feat/a?'}, setupAvailable: true, editorAvailable: true, confirmationOpen: true});
+		const tree = ShortcutBar({setupAvailable: true, editorAvailable: true, confirmationOpen: true});
 		const text = textContent(tree);
 
 		expect(text).toContain('d/y');
@@ -69,18 +70,8 @@ describe('ContextBar', () => {
 		expect(text).not.toContain('Enter');
 	});
 
-	it('sanitizes status text before rendering it to the terminal', () => {
-		const tree = ContextBar({status: {kind: 'idle', message: 'ready\u001b]0;owned\u0007\nnext\u202E'}, setupAvailable: false, editorAvailable: false, confirmationOpen: false});
-		const text = textContent(tree);
-
-		expect(text).toContain('ready next');
-		expect(text).not.toContain('\u001b');
-		expect(text).not.toContain('owned');
-		expect(text).not.toContain('\u202E');
-	});
-
 	it('hides the editor shortcut when no editor command is configured', () => {
-		const tree = ContextBar({status: {kind: 'idle', message: 'ready'}, setupAvailable: true, editorAvailable: false, confirmationOpen: false});
+		const tree = ShortcutBar({setupAvailable: true, editorAvailable: false, confirmationOpen: false});
 		const whiteText = collectElements(tree)
 			.filter(element => element.props.color === 'white')
 			.map(element => textContent(element.props.children));

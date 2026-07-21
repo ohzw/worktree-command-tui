@@ -90,10 +90,10 @@ it('debounces rerenders from window size changes after the initial frame', async
 		);
 		const {lastFrame, rerender} = rendered;
 		unmount = rendered.unmount;
-		expect(lastFrame()).toContain('Worktree Command TUI');
+		expect(lastFrame()).toContain('Repo: reclaim-the-forest');
 
 		rerender(<App initialModel={model} actions={actions} windowSizeOverride={{columns: 8, rows: 4}} resizeDebounceMs={100} />);
-		expect(lastFrame()).toContain('Worktree Command TUI');
+		expect(lastFrame()).toContain('Repo: reclaim-the-forest');
 		expect(lastFrame()).not.toContain('A:feat/a');
 
 		vi.advanceTimersByTime(100);
@@ -122,7 +122,7 @@ it('coalesces live stdout resize events before rendering the app shell', async (
 		let rows = 30;
 		Object.defineProperty(stdout, 'columns', {configurable: true, get: () => columns});
 		Object.defineProperty(stdout, 'rows', {configurable: true, get: () => rows});
-		expect(lastFrame()).toContain('Worktree Command TUI');
+		expect(lastFrame()).toContain('Repo: reclaim-the-forest');
 
 		const frameCountBeforeResize = stdout.frames.length;
 		for (const [nextColumns, nextRows] of [[8, 4], [120, 30], [8, 4]] as const) {
@@ -132,7 +132,7 @@ it('coalesces live stdout resize events before rendering the app shell', async (
 		}
 
 		expect(stdout.frames).toHaveLength(frameCountBeforeResize);
-		expect(lastFrame()).toContain('Worktree Command TUI');
+		expect(lastFrame()).toContain('Repo: reclaim-the-forest');
 		expect(lastFrame()).not.toContain('A:feat/a');
 
 		vi.advanceTimersByTime(100);
@@ -158,9 +158,9 @@ it('switches to stacked and minimal layouts at the expected breakpoints', () => 
 	expect(shouldUseCompactLayout(90, 22, 3)).toBe(false);
 	expect(shouldUseCompactLayout(30, 30, 1)).toBe(false);
 	expect(shouldUseCompactLayout(120, 30, 3)).toBe(false);
-	expect(shouldStackPanes(90, 26, 3)).toBe(false);
-	expect(shouldStackPanes(90, 27, 3)).toBe(true);
-	expect(shouldStackPanes(90, 28, 3)).toBe(true);
+	expect(shouldStackPanes(90, 22, 3)).toBe(false);
+	expect(shouldStackPanes(90, 23, 3)).toBe(true);
+	expect(shouldStackPanes(90, 24, 3)).toBe(true);
 	expect(shouldStackPanes(120, 40, 3)).toBe(false);
 });
 
@@ -183,12 +183,12 @@ it('renders colored pane labels and active marker in the main layout', () => {
 	const {lastFrame} = render(
 		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />,
 	);
-	expect(lastFrame()).toContain('Worktree Command TUI · Repo: reclaim-the-forest');
-	expect(lastFrame()).toContain('Active: feat/a');
-	expect(lastFrame()).toContain('Namespace: rojo-serve');
+	expect(lastFrame()).toContain('Repo: reclaim-the-forest');
+	expect(lastFrame()).toContain('ℹ Idle · feat/a — ready');
+	expect(lastFrame()).not.toContain('Namespace:');
 	expect(lastFrame()).toContain('Worktrees');
 	expect(lastFrame()).toContain('Selection / Action');
-	expect(lastFrame()).toContain('idle');
+	expect(lastFrame()).toContain('Idle');
 	expect(lastFrame()).toContain('/ Filter');
 	expect(lastFrame()).not.toContain('PageUp');
 	expect(stripAnsi(lastFrame())).toContain('* feat/a');
@@ -519,9 +519,9 @@ it('clears stale running state when log refresh observes no active session', asy
 	await new Promise(resolve => setTimeout(resolve, 450));
 	await waitForInput();
 	expect(actions.refreshLogs).toHaveBeenCalled();
-	expect(lastFrame()).toContain('Status: idle');
+	expect(lastFrame()).toContain('ℹ Idle');
 	expect(lastFrame()).toContain('session ended');
-	expect(lastFrame()).toContain('Active: -');
+	expect(lastFrame()).not.toContain('Running:');
 });
 
 it('does not poll full worktree metadata while running', async () => {
@@ -551,7 +551,7 @@ it('uses split layout when the stacked breakpoint no longer applies', () => {
 	}));
 	const model = createModel({rows: manyRows, activePath: '/repo/.worktree/feat-0', activeBranch: 'feat/0'});
 	const {lastFrame} = render(
-		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 90, rows: 26}} />,
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 96, rows: 26}} />,
 	);
 	expect(lastFrame()).toContain('[Action]');
 	expect(lastFrame()).not.toContain('Full Path:');
@@ -600,7 +600,7 @@ it('scrolls selection details when the pane is height constrained', async () => 
 		activeBranch: 'feat/a',
 	});
 	const {lastFrame, stdin} = render(
-		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 15}} />,
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 11}} />,
 	);
 	expect(lastFrame()).toContain('[Identity]');
 	expect(lastFrame()).toContain('█');
@@ -627,7 +627,7 @@ it('scrolls selection details with SGR mouse wheel input', async () => {
 		activeBranch: 'feat/a',
 	});
 	const {lastFrame, stdin} = render(
-		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 15}} />,
+		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 100, rows: 11}} />,
 	);
 	expect(lastFrame()).not.toContain('Full Path: /repo/.worktree/feat-a');
 	stdin.write('\u001B[<65;80;10M');
@@ -665,7 +665,7 @@ it('scrolls selection details with SGR mouse wheel in tall split layout', async 
 			path: '/repo/.worktree/feat-a',
 			shortPath: '.worktree/feat-a',
 			branch: 'feat/a',
-			tags: ['active'],
+			tags: ['active', 'main', 'external', 'legacy'],
 			headSha: '46af3f1c',
 			upstream: {branch: 'origin/develop', ahead: 4, behind: 24},
 			workingTree: {staged: 1, unstaged: 2, untracked: 3, conflicts: 0},
@@ -734,17 +734,17 @@ it('routes stacked-layout mouse wheel input by pane position', async () => {
 	const {lastFrame, stdin} = render(
 		<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 90, rows: 30}} />,
 	);
-	expect(stripAnsi(lastFrame())).not.toContain('feat-8');
+	expect(stripAnsi(lastFrame())).not.toContain('feat-10');
 	expect(lastFrame()).not.toContain('PR Title: Selection pane metadata');
 	stdin.write('\u001B[<65;10;6M');
 	await waitForInput();
 	await waitForInput();
 	expect(stripAnsi(lastFrame())).toContain('feat-3');
 	expect(lastFrame()).not.toContain('PR Title: Selection pane metadata');
-	stdin.write('\u001B[<65;10;16M');
+	stdin.write('\u001B[<65;10;18M');
 	await waitForInput();
 	await waitForInput();
-	stdin.write('\u001B[<65;10;16M');
+	stdin.write('\u001B[<65;10;18M');
 	await waitForInput();
 	await waitForInput();
 	expect(lastFrame()).toContain('PR Title: Selection pane metadata');
@@ -768,7 +768,7 @@ it('ignores mouse wheel input over header and footer chrome', async () => {
 	stdin.write('\u001B[<65;10;1M');
 	await waitForInput();
 	await waitForInput();
-	stdin.write('\u001B[<65;10;15M');
+	stdin.write('\u001B[<65;10;16M');
 	await waitForInput();
 	await waitForInput();
 	expect(stripAnsi(lastFrame() ?? '')).toBe(initialFrame);
@@ -866,7 +866,7 @@ it('keeps the active branch visible when header metadata is long', () => {
 		activeBranch: 'feature/this-is-a-very-long-branch-name-that-should-still-be-visible',
 	});
 	const {lastFrame} = render(<App initialModel={model} actions={makeFakeActions(model)} windowSizeOverride={{columns: 120, rows: 30}} />);
-	expect(lastFrame()).toContain('Active: feature/this-is-a-very-long-branch-name-that-should-still-be-visible');
+	expect(lastFrame()).toContain('Idle · feature/this-is-a-very-long-branch-name-that-should-still-be-visible');
 });
 
 it('truncates long branch labels in the worktree pane', () => {
@@ -1265,13 +1265,13 @@ it('ignores stale log refresh liveness after manual full refresh completes', asy
 	await vi.waitFor(() => expect(refreshLogs).toHaveBeenCalledTimes(1), {timeout: 1000});
 	stdin.write('r');
 	await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
-	await vi.waitFor(() => expect(lastFrame()).toContain('Active: feat/b'));
+	await vi.waitFor(() => expect(lastFrame()).toContain('Running: feat/b'));
 
 	staleLogRefresh.resolve({logs: initial.logs, activePath: initial.activePath, activeBranch: initial.activeBranch});
 	await waitForInput();
 	await waitForInput();
-	expect(lastFrame()).toContain('Active: feat/b');
-	expect(lastFrame()).not.toContain('Active: feat/a');
+	expect(lastFrame()).toContain('Running: feat/b');
+	expect(lastFrame()).not.toContain('Running: feat/a');
 
 });
 
@@ -1297,16 +1297,14 @@ it('keeps invalid enter feedback when stale log refresh liveness resolves', asyn
 	stdin.write('\r');
 	await waitForInput();
 	expect(start).not.toHaveBeenCalled();
-	expect(lastFrame()).toContain('Active: develop');
-	expect(lastFrame()).toContain('Status: error');
+	expect(lastFrame()).toContain('✘ Error · develop');
 	expect(lastFrame()).toContain(invalidReason);
 
 	staleLogRefresh.resolve({logs: model.logs, activePath: null, activeBranch: null});
 	await waitForInput();
 	await waitForInput();
-	expect(lastFrame()).toContain('Status: error');
+	expect(lastFrame()).toContain('✘ Error · develop');
 	expect(lastFrame()).toContain(invalidReason);
-	expect(lastFrame()).toContain('Active: develop');
 });
 
 it('continues refreshing logs after invalid-row feedback while a session is active', async () => {
@@ -1329,7 +1327,7 @@ it('continues refreshing logs after invalid-row feedback while a session is acti
 	stdin.write('\r');
 	await waitForInput();
 	expect(start).not.toHaveBeenCalled();
-	expect(lastFrame()).toContain('Status: error');
+	expect(lastFrame()).toContain('✘ Error');
 
 	const callsAfterError = refreshLogs.mock.calls.length;
 	await vi.waitFor(() => expect(refreshLogs.mock.calls.length).toBeGreaterThan(callsAfterError), {timeout: 1000});
@@ -1364,7 +1362,7 @@ it('keeps the same worktree selected when start reorders the list', async () => 
 	await waitForInput();
 	await waitForInput();
 	await waitForInput();
-	expect(lastFrame()).toContain('Active: feat/b');
+	expect(lastFrame()).toContain('Running: feat/b');
 	expect(lastFrame()).toContain('Path: .worktree/feat-b');
 	expect(lastFrame()).toContain('[Action]');
 	expect(lastFrame()).toContain('Already active. Press Enter to restart, or s to stop.');
@@ -1384,7 +1382,7 @@ it('continues refreshing logs while active sessions are running', async () => {
 	await new Promise(resolve => setTimeout(resolve, 450));
 	await waitForInput();
 	expect(refreshLogs).toHaveBeenCalled();
-	expect(lastFrame()).toContain('Active: feat/a');
+	expect(lastFrame()).toContain('Running: feat/a');
 });
 
 
@@ -1417,7 +1415,7 @@ it('restarts the already-active worktree when enter is pressed', async () => {
 	stdin.write('\r');
 	await waitForInput();
 	expect(start).toHaveBeenCalledWith('/repo/.worktree/feat-a');
-	await vi.waitFor(() => expect(lastFrame()).toContain('restarted feat/a'));
+	await vi.waitFor(() => expect(lastFrame()).toContain('Running: feat/a — restarted'));
 });
 
 it('runs setup command for the selected worktree when i is pressed', async () => {
@@ -1558,7 +1556,7 @@ it('starts without running setup when enter is pressed and setup is available', 
 	await waitForInput();
 	expect(start).toHaveBeenCalledWith('/repo/.worktree/feat-a');
 	expect(setup).not.toHaveBeenCalled();
-	await vi.waitFor(() => expect(lastFrame()).toContain('Active: feat/a'));
+	await vi.waitFor(() => expect(lastFrame()).toContain('Running: feat/a'));
 });
 
 

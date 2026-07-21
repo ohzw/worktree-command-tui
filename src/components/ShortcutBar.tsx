@@ -1,27 +1,5 @@
 import React from 'react';
 import {Box, Text} from 'ink';
-import {Spinner} from '@inkjs/ui';
-import {sanitizeInlineText} from '../core/worktree-projection.js';
-import type {AppStatus} from '../core/runtime.js';
-
-const KIND_TO_ICON: Record<AppStatus['kind'], 'ℹ' | '⚠' | '✓' | '✘'> = {
-	idle: 'ℹ',
-	starting: '⚠',
-	'setting-up': '⚠',
-	running: '✓',
-	stopping: '⚠',
-	error: '✘',
-};
-
-const KIND_TO_COLOR = {
-	idle: 'blue',
-	starting: 'yellow',
-	'setting-up': 'yellow',
-	running: 'green',
-	stopping: 'yellow',
-	error: 'red',
-} as const;
-
 
 interface KeyHint {
 	binding: string;
@@ -62,30 +40,19 @@ function buildKeyHints(setupAvailable: boolean, editorAvailable: boolean, confir
 	return hints;
 }
 
-export function ContextBar({
-	status,
+export function ShortcutBar({
 	setupAvailable,
 	editorAvailable,
 	confirmationOpen,
 }: {
-	status: AppStatus;
 	setupAvailable: boolean;
 	editorAvailable: boolean;
 	confirmationOpen: boolean;
 }) {
-	const isBusy = status.kind === 'setting-up' || status.kind === 'starting' || status.kind === 'stopping';
 	const keyHints = buildKeyHints(setupAvailable, editorAvailable, confirmationOpen);
-	const statusMessage = sanitizeInlineText(status.message);
 
 	return (
-		<Box borderStyle="round" borderColor={KIND_TO_COLOR[status.kind]} flexDirection="column" paddingX={1}>
-			{isBusy ? (
-				<Spinner label={`Status: ${status.kind} — ${statusMessage}`} />
-			) : (
-				<Text color={KIND_TO_COLOR[status.kind]} wrap="truncate-end">
-					{KIND_TO_ICON[status.kind]} Status: {status.kind} — {statusMessage}
-				</Text>
-			)}
+		<Box flexShrink={0} paddingX={1}>
 			<Text wrap="truncate-end">
 				{keyHints.map((hint, hintIndex) => (
 					<React.Fragment key={hint.binding}>

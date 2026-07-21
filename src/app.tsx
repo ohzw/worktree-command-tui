@@ -2,7 +2,7 @@ import {Alert, Spinner} from '@inkjs/ui';
 import {memo, useEffect, useMemo, useRef, useState} from 'react';
 import {Box, Text, useApp, useInput, useStdin, useStdout} from 'ink';
 import {ActionPanel} from './components/ActionPanel.js';
-import {ContextBar} from './components/ContextBar.js';
+import {ShortcutBar} from './components/ShortcutBar.js';
 import {Header} from './components/Header.js';
 import {HelpWindow} from './components/HelpWindow.js';
 import {FloatingLogWindow} from './components/FloatingLogWindow.js';
@@ -79,15 +79,15 @@ export function shouldUseMinimalLayout(columns: number, rows: number): boolean {
 	return columns < 20 || rows < 10;
 }
 
-const STACKED_LAYOUT_FRAME_ROWS = 9;
-const HEADER_HEIGHT = 5;
-const CONTEXT_BAR_HEIGHT = 4;
+const STACKED_LAYOUT_FRAME_ROWS = 5;
+const HEADER_HEIGHT = 4;
+const SHORTCUT_BAR_HEIGHT = 1;
 const PANE_GAP_WIDTH = 1;
 const MIN_STACKED_PANE_HEIGHT = 9;
 export const RESIZE_DEBOUNCE_MS = 100;
 
 export function shouldStackPanes(columns: number, rows: number, _worktreeCount = 0): boolean {
-	// Header + context bar consume the fixed chrome; each stacked pane still keeps ~6 visible content lines at the minimum height.
+	// Header + shortcut bar consume the fixed chrome; each stacked pane still keeps ~6 visible content lines at the minimum height.
 	return columns < 96 && rows >= STACKED_LAYOUT_FRAME_ROWS + (MIN_STACKED_PANE_HEIGHT * 2);
 }
 
@@ -677,8 +677,8 @@ function AppShellContent({
 	const stackedWorktreePaneBottom = stackedLayout && stackedWorktreePaneTop !== undefined && paneHeight !== undefined ? stackedWorktreePaneTop + paneHeight - 1 : undefined;
 	const stackedSelectionPaneTop = stackedLayout && stackedWorktreePaneBottom !== undefined ? stackedWorktreePaneBottom + 1 : undefined;
 	const stackedSelectionPaneBottom = stackedLayout && stackedSelectionPaneTop !== undefined && paneHeight !== undefined ? stackedSelectionPaneTop + paneHeight - 1 : undefined;
-	const logPaneTop = showLogPanel ? rootHeight - CONTEXT_BAR_HEIGHT - logPaneHeight + 1 : undefined;
-	const logPaneBottom = showLogPanel ? rootHeight - CONTEXT_BAR_HEIGHT : undefined;
+	const logPaneTop = showLogPanel ? rootHeight - SHORTCUT_BAR_HEIGHT - logPaneHeight + 1 : undefined;
+	const logPaneBottom = showLogPanel ? rootHeight - SHORTCUT_BAR_HEIGHT : undefined;
 
 	useEffect(() => {
 		const onData = (data: Buffer | string) => {
@@ -870,7 +870,7 @@ function AppShellContent({
 
 	return (
 		<Box width={rootWidth} height={rootHeight} flexDirection="column">
-			<Header repoName={model.repoName} namespace={model.namespace} activeBranch={model.activeBranch} />
+			<Header repoName={model.repoName} activeBranch={model.activeBranch} status={visibleStatus} />
 			<Box flexDirection={stackedLayout ? 'column' : 'row'} flexGrow={stackedLayout ? 0 : 1} flexShrink={1}>
 				<WorktreeList
 					rows={visibleRows}
@@ -886,7 +886,7 @@ function AppShellContent({
 				<ActionPanel selectedRow={selected} activePath={model.activePath} setupAvailable={model.setupAvailable} stacked={stackedLayout} width={stackedLayout ? bodyWidth : actionWidth} height={paneHeight} compactDetails={compactDetailPane} scrollOffset={selectionScrollOffset} />
 			</Box>
 			{showLogPanel ? <LogPanel logs={model.logs} width={bodyWidth} height={logPaneHeight} scrollOffset={logScrollOffset} /> : null}
-			<ContextBar status={visibleStatus} setupAvailable={model.setupAvailable} editorAvailable={model.editorAvailable} confirmationOpen={confirmationOpen} />
+			<ShortcutBar setupAvailable={model.setupAvailable} editorAvailable={model.editorAvailable} confirmationOpen={confirmationOpen} />
 			{safeCompletedAlert ? (
 				<Box position="absolute" top={1} right={2}>
 					<Alert variant="success">{safeCompletedAlert}</Alert>
